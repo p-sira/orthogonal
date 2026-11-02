@@ -117,6 +117,25 @@ fn positive_order(degree: f64, order: usize, x: f64) -> f64 {
     }
     let fractional = if degree < 0.0 { degree } else { degree.fract() };
     let integer = degree.max(0.0).floor() as usize;
+    if order >= 2 && integer > order + 1 && x <= 0.8 {
+        // In the oscillatory interior, propagate P_v and P_(v-1) using the
+        // stable degree recurrence, then raise the order once at the final
+        // degree. This avoids two high-order Gauss-series evaluations and
+        // their large gamma-like prefactors for every ordinary scalar call.
+        // Near x=1, P_v^1 from neighboring degrees loses digits to
+        // cancellation; use the direct Gauss series near that endpoint.
+        let mut previous = gauss_seed(fractional, 0, x, true);
+        let mut current = gauss_seed(fractional + 1.0, 0, x, true);
+        for n in 2..=integer {
+            let v = n as f64 + fractional;
+            let next = ((2.0 * v - 1.0) * x * current - (v - 1.0) * previous) / v;
+            previous = current;
+            current = next;
+        }
+        // P_v^1 = v (x P_v - P_(v-1))/sqrt(1-x²), Condon–Shortley phase.
+        let p1 = degree * (x * current - previous) / ((1.0 - x) * (1.0 + x)).sqrt();
+        return raise_from_two(degree, order, x, current, p1);
+    }
     if integer <= order + 1 {
         return gauss_seed(degree, order, x, true);
     }

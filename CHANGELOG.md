@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+**Performance**
+- `lpmv`: Avoid expensive high-order hypergeometric seeds for well-conditioned interior arguments by combining a stable degree recurrence with one associated-order recurrence; preserve direct evaluation near the positive endpoint to avoid cancellation.
+
 **Bug Fixes**
 - `lqn` and `lqmn`: Restore Sci-compatible degree and order limits up to 4096 and the established matrix-size bound; support the real exterior associated-Q branch for positive orders.
 - `lpmv`: Restore the documented Sci real-degree and integer-order input domain, including noninteger degrees near the negative endpoint.
