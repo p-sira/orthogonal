@@ -37,4 +37,4 @@ assert_eq!(nodes.len(), weights.len());
 
 `eval_*` functions return `NaN` for invalid inputs. Checked evaluations, coefficient constructors, and quadrature return `Result<_, orthogonal::Error>`. Coefficients are in descending powers; quadrature nodes are sorted ascending.
 
-The definitions are cross-checked against SciPy and the [NIST DLMF](https://dlmf.nist.gov/18).
+The definitions are cross-checked against SciPy and the [NIST DLMF](https://dlmf.nist.gov/18). Since [sci-special](https://github.com/p-sira/sci/tree/main/crates/sci-special) wraps over `orthogonal` directly, you should find the comprehensive accuracy report [here](https://github.com/p-sira/sci-testing/blob/main/docs/accuracy/special.md#scispecialorthogonal).
