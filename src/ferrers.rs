@@ -11,11 +11,12 @@
 ///
 /// # Domain and special values
 ///
-/// Integral degree: `0<=v<=4096`, `|m|<=4096`, `-1<=x<=1`.
-/// Noninteger degree: `|v|<=32`, `|m|<=12`, `-0.9<=x<=0.9`.
+/// Integral degree: `0<=v<=1_000_000`, `-1<=x<=1`, with integer order.
+/// Noninteger degree: `|v|<=32`, `|m|<=12`, `-0.9<=x<=1`.
 /// Values outside the supported real domain or whose bounded hypergeometric
-/// series fails to converge return NaN. Noninteger degrees near the branch
-/// endpoints are excluded because direct series summation is ill-conditioned.
+/// series fails to converge return NaN. Noninteger degrees near the negative branch endpoint are excluded because
+/// direct series summation is ill-conditioned. The positive endpoint x=1
+/// is regular: P_v(1)=1 and P_v^m(1)=0 for nonzero integer m.
 /// Values are dimensionless and are not spherically normalized.
 ///
 /// # Numerical behavior
@@ -35,12 +36,12 @@ pub fn lpmv(m: i32, v: f64, x: f64) -> f64 {
     if !v.is_finite() || !x.is_finite() || x.abs() > 1.0 {
         return f64::NAN;
     }
-    if v >= 0.0 && v.fract() == 0.0 && v <= 4096.0 && m.unsigned_abs() <= 4096 {
+    if v >= 0.0 && v.fract() == 0.0 && v <= 1_000_000.0 {
         return super::assoc_legendre_p(v as u32, m, x).unwrap_or(f64::NAN);
     }
     // Ferrers symmetry P_{-v-1}^m = P_v^m.
     let v = if v < -0.5 { -v - 1.0 } else { v };
-    if v < -0.5 || v > 32.0 || m.unsigned_abs() > 12 || x.abs() > 0.9 {
+    if v < -0.5 || v > 32.0 || m.unsigned_abs() > 12 || x < -0.9 {
         return f64::NAN;
     }
     let order = m.unsigned_abs() as usize;

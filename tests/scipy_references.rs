@@ -215,14 +215,15 @@ fn legendre_and_associated_table_entries_match_scalar_evaluators() {
 fn rejects_out_of_domain_inputs_and_degrees() {
     assert!(legendre(257, false).is_err());
     assert!(roots_legendre(0).is_err());
-    assert!(roots_legendre(257).is_err());
+    assert!(roots_legendre(1025).is_err());
     assert!(roots_jacobi(3, -1.0, 0.0).is_err());
     assert!(roots_gegenbauer(3, -0.5).is_err());
     assert!(sh_jacobi(3, 0.3, 2.0, false).is_err());
     assert!(assoc_legendre_p_all(129, 1, 0.5).is_err());
     assert!(sph_harm_y_all(3, 3, 0.3, f64::NAN).is_err());
     assert!(eval_legendre(-1, 0.5_f64).is_nan());
-    assert!(eval_legendre(4097, 0.5_f64).is_nan());
+    assert!(eval_legendre(1_000_001, 0.5_f64).is_nan());
+    assert!(eval_legendre(4097, 0.5_f64).is_finite());
     assert!(eval_jacobi(2, -1.0_f64, 0.2, 0.4).is_nan());
     assert!(eval_chebyt(2, f64::NAN).is_nan());
     assert!(assoc_legendre_p(2, 1, 2.0_f64).is_err());

@@ -128,7 +128,7 @@ macro_rules! evaluator {
         $(#[$meta])*
         #[inline]
         pub fn $name<T: Float>($n: i32, $($arg: T),*) -> T {
-            if !(0..=4096).contains(&$n) { return T::nan(); }
+            if !(0..=1_000_000).contains(&$n) { return T::nan(); }
             evaluate::$name($n, $($arg),*).unwrap_or_else(|_| T::nan())
         }
     };
@@ -188,20 +188,32 @@ pub fn eval_sh_legendre(n: i32, x: f64) -> f64 {
     eval_legendre(n, 2.0 * x - 1.0)
 }
 /// Shifted Jacobi `G_n^(p,q)(x) = n! Γ(n+p)/Γ(2n+p) P_n^(p-q,q-1)(2x-1)`.
-/// Requires `0<=n<=4096`, `q>0`, `p-q>-1`, and finite `p,q`.
+/// Requires `0<=n<=1_000_000`, `q>0`, `p-q>-1`, and finite `p,q`.
 pub fn eval_sh_jacobi(n: i32, p: f64, q: f64, x: f64) -> f64 {
-    if !(0..=4096).contains(&n) || !p.is_finite() || !q.is_finite() || q <= 0.0 || p - q <= -1.0 {
+    if !(0..=1_000_000).contains(&n)
+        || !p.is_finite()
+        || !q.is_finite()
+        || q <= 0.0
+        || p - q <= -1.0
+    {
         return f64::NAN;
+    }
+    if n == 0 {
+        return 1.0;
     }
     let nf = n as f64;
     (gammaln(nf + 1.0) + gammaln(nf + p) - gammaln(2.0 * nf + p)).exp()
         * eval_jacobi(n, p - q, q - 1.0, 2.0 * x - 1.0)
 }
 
-/// All Legendre polynomial values `[P_0(x), ..., P_n(x)]` (bounded by 4096).
+/// All Legendre polynomial values `[P_0(x), ..., P_n(x)]` for `n <= 1_000_000`.
+///
+/// Takes `O(n)` time and memory; the recurrence is stable on `[-1, 1]`.
+/// Outside this interval, values can overflow for large degrees.
+/// NaN inputs produce a table of NaNs.
 pub fn legendre_p_all(n: usize, x: f64) -> Result<Vec<f64>> {
-    if n > 4096 {
-        return Err(Error::InvalidInput("degree must not exceed 4096"));
+    if n > 1_000_000 {
+        return Err(Error::InvalidInput("degree must not exceed 1,000,000"));
     }
     Ok(evaluate::legendre_all(n, x))
 }
@@ -257,38 +269,96 @@ pub fn sph_harm_y_all(
     Ok(associated::sph_harm_table(n, m, theta, phi))
 }
 
-/// The pair `(values, derivatives)` of `Q_0(x),...,Q_n(x)`, real Legendre
-/// functions of the second kind and derivatives, in ascending degree order.
+/// Real Legendre functions of the second kind `Q_0(x),...,Q_n(x)` and
+/// their derivatives, in ascending degree order.
 ///
-/// The Ferrers branch is used on `-1 < x < 1`, where `Q_0(x)=atanh(x)` and
-/// `(n+1)Q_(n+1)=(2n+1)x Q_n-n Q_(n-1)`; derivatives are with respect to `x`.
-/// Requires `n <= 128` and `|x| < 1`; exterior real branches are unsupported.
+/// On `-1 < x < 1`, the Ferrers branch uses `Q_0(x)=atanh(x)`. On the real
+/// exterior `|x| > 1`, `Q_0(x)=atanh(1/x)` is the real-valued continuation;
+/// `Q_n(-x)=(-1)^(n+1)Q_n(x)`. The recurrence is
+/// `(n+1)Q_(n+1)=(2n+1)x Q_n-n Q_(n-1)` on either branch.
+///
+/// Requires `n <= 128` and finite `x != ±1`; these endpoints are logarithmic
+/// singularities. The exterior branch uses a continued fraction for the
+/// minimal solution to prevent the growing Legendre P solution from corrupting
+/// high-degree Q values. Results may underflow to zero at very large `|x|`.
 ///
 /// # Examples
 /// ```
 /// let (q, d) = orthogonal::lqn(1, 0.3)?;
 /// assert!((q[0] - 0.3_f64.atanh()).abs() < 1e-14);
 /// assert_eq!(q.len(), d.len());
+/// let (q, _) = orthogonal::lqn(1, 2.0)?;
+/// assert!((q[0] - 0.5 * 3.0_f64.ln()).abs() < 1e-14);
 /// # Ok::<(), orthogonal::Error>(())
 /// ```
 pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
-    if n > 128 || !(-1.0..1.0).contains(&x) {
-        return Err(Error::InvalidInput("Legendre Q requires n<=128 and -1<x<1"));
+    if n > 128 || !x.is_finite() || x.abs() == 1.0 {
+        return Err(Error::InvalidInput(
+            "Legendre Q requires n<=128, finite x != ±1",
+        ));
     }
     let mut q = vec![0.0; n + 1];
     let mut d = vec![0.0; n + 1];
     let denominator = (1.0 - x) * (1.0 + x);
-    q[0] = x.atanh();
+    if x.abs() < 1.0 {
+        q[0] = x.atanh();
+        if n > 0 {
+            q[1] = x * q[0] - 1.0;
+        }
+        for k in 2..=n {
+            let kf = k as f64;
+            q[k] = ((2.0 * kf - 1.0) * x * q[k - 1] - (kf - 1.0) * q[k - 2]) / kf;
+        }
+    } else {
+        let a = x.abs();
+        // log1p avoids reciprocal rounding near |x|=1 and avoids catastrophic
+        // cancellation in atanh(1/x) as |x| tends to infinity.
+        let q0 = 0.5 * (2.0 / (a - 1.0)).ln_1p();
+        q[0] = q0;
+        let acosh = a.acosh();
+        if (n as f64) * acosh <= 1.0 {
+            // Very near the logarithmic singularity, the ordinary recurrence
+            // is well conditioned over n steps and needs no backward iteration.
+            if n > 0 {
+                q[1] = a * q0 - 1.0;
+            }
+            for k in 2..=n {
+                let kf = k as f64;
+                q[k] = ((2.0 * kf - 1.0) * a * q[k - 1] - (kf - 1.0) * q[k - 2]) / kf;
+            }
+        } else {
+            // Pincherle's minimal-solution continued fraction:
+            // Q_k/Q_(k-1) = k / ((2k+1)*x - (k+1)*Q_(k+1)/Q_k).
+            // Truncation error decreases exponentially with acosh(x).
+            let extra = (20.0 / acosh).ceil().max(32.0) as usize;
+            let mut ratios = vec![0.0; n + 1];
+            let mut next_ratio = 0.0;
+            for k in (1..=n + extra).rev() {
+                let kf = k as f64;
+                next_ratio = (kf / a) / ((2.0 * kf + 1.0) - (kf + 1.0) * next_ratio / a);
+                if k <= n {
+                    ratios[k] = next_ratio;
+                }
+            }
+            for k in 1..=n {
+                q[k] = q[k - 1] * ratios[k];
+            }
+        }
+        // Q_n(-x)=(-1)^(n+1) Q_n(x).
+        if x < 0.0 {
+            for (k, value) in q.iter_mut().enumerate() {
+                if k % 2 == 0 {
+                    *value = -*value;
+                }
+            }
+        }
+    }
     d[0] = 1.0 / denominator;
-    if n > 0 {
-        q[1] = x * q[0] - 1.0;
-    }
-    for k in 2..=n {
-        let kf = k as f64;
-        q[k] = ((2.0 * kf - 1.0) * x * q[k - 1] - (kf - 1.0) * q[k - 2]) / kf;
-    }
     for k in 1..=n {
         d[k] = (k as f64) * (q[k - 1] - x * q[k]) / denominator;
+    }
+    if q.iter().chain(&d).any(|value| !value.is_finite()) {
+        return Err(Error::NonFiniteEvaluation);
     }
     Ok((q, d))
 }
@@ -297,16 +367,21 @@ pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
 ///
 /// The returned `(values,derivatives)` matrices have `m+1` order rows and
 /// `n+1` degree columns, with the associated (Condon–Shortley) phase.
-/// Requires `m,n <= 128`, `-1 < x < 1`. At the endpoints these functions
-/// diverge, so the real interior branch is explicitly required.
+/// Requires `m,n <= 128`, `-1 < x < 1` for positive orders. For `m=0`,
+/// also supports the real exterior `|x|>1` as [`lqn`]. At the endpoints,
+/// these functions diverge and are undefined.
 ///
 /// # References
 /// NIST DLMF Chapter 14 and [SciPy `lqmn`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.lqmn.html).
 pub fn lqmn(m: usize, n: usize, x: f64) -> Result<ValueDerivativeMatrices> {
-    if n > 128 || m > 128 || !(-1.0..1.0).contains(&x) {
+    if n > 128 || m > 128 || !x.is_finite() || x.abs() == 1.0 || (m > 0 && x.abs() > 1.0) {
         return Err(Error::InvalidInput(
-            "associated Legendre Q requires m,n<=128 and -1<x<1",
+            "associated Legendre Q requires m,n<=128; positive orders require -1<x<1",
         ));
+    }
+    if m == 0 {
+        let (values, slopes) = lqn(n, x)?;
+        return Ok((vec![values], vec![slopes]));
     }
     let mut values = vec![vec![0.0; n + 1]; m + 1];
     let mut slopes = vec![vec![0.0; n + 1]; m + 1];

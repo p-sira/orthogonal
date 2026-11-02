@@ -11,7 +11,7 @@ use crate::{Error, Result};
 ///
 /// Entries of `off` describe the `n-1` subdiagonal values; the returned
 /// eigenvectors are arranged as vectors, in increasing eigenvalue order.
-/// Orders from 1 through 256 are accepted.
+/// Orders from 1 through 1024 are accepted.
 #[cfg(test)]
 pub(crate) fn eigensystem(diagonal: &[f64], off: &[f64]) -> Result<(Vec<f64>, Vec<Vec<f64>>)> {
     let (values, rows) = tridiagonal_eigensystem(diagonal, off, true)?;
@@ -37,8 +37,8 @@ fn tridiagonal_eigensystem(
     all_vectors: bool,
 ) -> Result<(Vec<f64>, Vec<Vec<f64>>)> {
     let n = diagonal.len();
-    if n == 0 || n > 256 {
-        return Err(Error::InvalidInput("tridiagonal order must be in 1..=256"));
+    if n == 0 || n > 1024 {
+        return Err(Error::InvalidInput("tridiagonal order must be in 1..=1024"));
     }
     if off.len() != n - 1 {
         return Err(Error::DimensionMismatch);
@@ -230,8 +230,8 @@ fn quadrature(
     shift: f64,
     weight_scale: f64,
 ) -> Result<(Vec<f64>, Vec<f64>)> {
-    if n == 0 || n > 256 {
-        return Err(Error::InvalidInput("quadrature order must be in 1..=256"));
+    if n == 0 || n > 1024 {
+        return Err(Error::InvalidInput("quadrature order must be in 1..=1024"));
     }
     let mut diagonal = Vec::with_capacity(n);
     let mut off = Vec::with_capacity(n - 1);
@@ -317,7 +317,7 @@ pub fn jacobi(n: usize, alpha: f64, beta: f64, monic: bool) -> Result<Vec<f64>> 
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -379,7 +379,7 @@ pub fn legendre(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -441,7 +441,7 @@ pub fn gegenbauer(n: usize, alpha: f64, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -508,7 +508,7 @@ pub fn genlaguerre(n: usize, alpha: f64, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -570,7 +570,7 @@ pub fn laguerre(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -627,7 +627,7 @@ pub fn hermite(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -684,7 +684,7 @@ pub fn hermitenorm(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -741,7 +741,7 @@ pub fn chebyt(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -798,7 +798,7 @@ pub fn chebyu(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -855,7 +855,7 @@ pub fn chebyc(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -912,7 +912,7 @@ pub fn chebys(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -969,7 +969,7 @@ pub fn sh_chebyt(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -1026,7 +1026,7 @@ pub fn sh_chebyu(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -1083,7 +1083,7 @@ pub fn sh_legendre(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///
@@ -1154,7 +1154,7 @@ pub fn sh_jacobi(n: usize, p: f64, q: f64, monic: bool) -> Result<Vec<f64>> {
 ///
 /// ## Parameters and domain
 ///
-/// `n` is the number of nodes in `1..=256`; shape parameters must define an
+/// `n` is the number of nodes in `1..=1024`; shape parameters must define an
 /// integrable positive weight. Nodes are sorted ascending. The weights integrate
 /// weighted polynomials exactly through degree 2n−1, up to floating-point error.
 ///

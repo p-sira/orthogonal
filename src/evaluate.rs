@@ -248,7 +248,9 @@ fn legendre(n: i32, x: f64) -> f64 {
 }
 
 /// P_0(x), ..., P_n(x) in one pass of the recurrence used by [`legendre`];
-/// each entry is bit-identical to the corresponding single-degree value.
+/// entries match scalar evaluation within floating-point rounding. For tiny
+/// |x| and n <= 4096, the scalar near-zero series is retained. Larger tables
+/// use the O(n) three-term recurrence to avoid quadratic work.
 #[inline]
 pub(crate) fn legendre_all(n: usize, x: f64) -> Vec<f64> {
     let per_degree = |k: usize| {
@@ -259,7 +261,7 @@ pub(crate) fn legendre_all(n: usize, x: f64) -> Vec<f64> {
         }
     };
     let a = x.abs();
-    if x.is_nan() || a < 1e-5 || a == 1.0 || a.is_infinite() || n < 2 {
+    if x.is_nan() || (a < 1e-5 && n <= 4096) || a == 1.0 || a.is_infinite() || n < 2 {
         return (0..=n).map(per_degree).collect();
     }
     if a < 0.9 {
