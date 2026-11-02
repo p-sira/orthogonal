@@ -1,0 +1,16 @@
+[package]
+name = "orthogonal"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+authors = ["Sira Pornsiriprasert"]
+license = "BSD-3-Clause"
+description = "Classical orthogonal polynomials, associated Legendre functions and Gaussian quadrature"
+readme = "README.md"
+keywords = ["orthogonal", "polynomials", "legendre", "quadrature", "numerics"]
+categories = ["mathematics", "science"]
+include = ["/src/**", "/README.md", "/LICENSE"]
+
+[dependencies]
+num-complex = "0.4"
+num-traits = "0.2"
