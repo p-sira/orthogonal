@@ -12,6 +12,7 @@
 //! ```
 //! let p = orthogonal::legendre(2, false)?;
 //! assert_eq!(p, vec![1.5, 0.0, -0.5]);
+//!
 //! let (x, w) = orthogonal::roots_legendre(3)?;
 //! assert_eq!(x.len(), 3);
 //! assert!((w.iter().sum::<f64>() - 2.0).abs() < 1e-13);
@@ -34,7 +35,7 @@ pub type ValueDerivativeMatrices = (Vec<Vec<f64>>, Vec<Vec<f64>>);
 pub use associated::{assoc_legendre_p, sph_harm_y, sph_legendre_p};
 pub use coefficients::*;
 
-/// Failure to construct a polynomial or Gaussian rule.
+/// Error returned by checked polynomial evaluations, constructors and Gaussian rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     /// Input degree, order, parameter or matrix shape is invalid.
@@ -58,17 +59,16 @@ impl fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-/// Result returned by checked coefficient constructors and quadrature rules.
+/// Result returned by checked numerical operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 // The scalar backends deliberately distinguish a NaN (undefined) from an
 // infinity (which may be a legitimate overflow result for a polynomial).
-pub(crate) type StrErr = &'static str;
-pub(crate) fn finish<T: Float>(value: f64, error: StrErr) -> std::result::Result<T, StrErr> {
+pub(crate) fn finish<T: Float>(value: f64, error: Error) -> Result<T> {
     if value.is_nan() {
         Err(error)
     } else {
-        T::from(value).ok_or("floating-point conversion failed")
+        T::from(value).ok_or(Error::NonFiniteEvaluation)
     }
 }
 
@@ -124,96 +124,141 @@ fn signed_half_beta(a: f64, b: f64) -> f64 {
 }
 
 macro_rules! evaluator {
-    ($(#[$meta:meta])* $name:ident($n:ident $(, $arg:ident)*)) => {
+    ($(#[$meta:meta])* $name:ident, $try_name:ident($n:ident $(, $arg:ident)*)) => {
         $(#[$meta])*
         #[inline]
         pub fn $name<T: Float>($n: i32, $($arg: T),*) -> T {
-            if !(0..=1_000_000).contains(&$n) { return T::nan(); }
-            evaluate::$name($n, $($arg),*).unwrap_or_else(|_| T::nan())
+            $try_name($n, $($arg),*).unwrap_or_else(|_| T::nan())
+        }
+
+        #[doc = concat!("Checked counterpart of [`", stringify!($name), "`].")]
+        /// Returns [`Error::InvalidInput`] for invalid arguments or degree.
+        #[inline]
+        pub fn $try_name<T: Float>($n: i32, $($arg: T),*) -> Result<T> {
+            if !(0..=1_000_000).contains(&$n) {
+                return Err(Error::InvalidInput("polynomial degree must be in 0..=1,000,000"));
+            }
+            evaluate::$name($n, $($arg),*)
         }
     };
 }
 
 evaluator! {
 /// Jacobi polynomial `P_n^(alpha,beta)(x)`, orthogonal with weight `(1-x)^alpha (1+x)^beta`, `alpha,beta > -1`.
-eval_jacobi(n, alpha, beta, x) }
+eval_jacobi, try_eval_jacobi(n, alpha, beta, x) }
 evaluator! {
 /// Legendre polynomial `P_n(x)` defined by `P_0=1`, `P_1=x`, `(n+1)P_{n+1}=(2n+1)xP_n-nP_{n-1}`.
-eval_legendre(n, x) }
+eval_legendre, try_eval_legendre(n, x) }
 evaluator! {
 /// Gegenbauer polynomial `C_n^alpha(x)`, with generating function `(1-2xt+t²)^(-alpha)`.
-eval_gegenbauer(n, alpha, x) }
+eval_gegenbauer, try_eval_gegenbauer(n, alpha, x) }
 evaluator! {
 /// Generalized Laguerre polynomial `L_n^alpha(x)`, orthogonal with weight `x^alpha exp(-x)` for `alpha > -1`.
-eval_genlaguerre(n, alpha, x) }
+eval_genlaguerre, try_eval_genlaguerre(n, alpha, x) }
 evaluator! {
 /// Laguerre polynomial `L_n(x)=L_n^0(x)`.
-eval_laguerre(n, x) }
+eval_laguerre, try_eval_laguerre(n, x) }
 evaluator! {
 /// Physicists' Hermite polynomial `H_n(x)` with `H_0=1`, `H_1=2x`, `H_{n+1}=2xH_n-2nH_{n-1}`.
-eval_hermite(n, x) }
+eval_hermite, try_eval_hermite(n, x) }
 evaluator! {
 /// Probabilists' Hermite polynomial `He_n(x)` with `He_0=1`, `He_1=x`, `He_{n+1}=xHe_n-nHe_{n-1}`.
-eval_hermitenorm(n, x) }
+eval_hermitenorm, try_eval_hermitenorm(n, x) }
 evaluator! {
 /// Chebyshev polynomial `T_n(x)=cos(n arccos x)` for `-1<=x<=1`.
-eval_chebyt(n, x) }
+eval_chebyt, try_eval_chebyt(n, x) }
 evaluator! {
 /// Chebyshev polynomial `U_n(x)=sin((n+1)arccos x)/sin(arccos x)` for `-1<x<1`.
-eval_chebyu(n, x) }
+eval_chebyu, try_eval_chebyu(n, x) }
 
 /// Scaled Chebyshev first kind, `C_n(x)=2 T_n(x/2)`.
 #[inline]
 pub fn eval_chebyc(n: i32, x: f64) -> f64 {
     2.0 * eval_chebyt(n, x / 2.0)
 }
+/// Checked counterpart of [`eval_chebyc`].
+pub fn try_eval_chebyc(n: i32, x: f64) -> Result<f64> {
+    try_eval_chebyt(n, x / 2.0).map(|v| 2.0 * v)
+}
 /// Scaled Chebyshev second kind, `S_n(x)=U_n(x/2)`.
 #[inline]
 pub fn eval_chebys(n: i32, x: f64) -> f64 {
     eval_chebyu(n, x / 2.0)
+}
+/// Checked counterpart of [`eval_chebys`].
+pub fn try_eval_chebys(n: i32, x: f64) -> Result<f64> {
+    try_eval_chebyu(n, x / 2.0)
 }
 /// Shifted Chebyshev first kind, `T_n(2x-1)`.
 #[inline]
 pub fn eval_sh_chebyt(n: i32, x: f64) -> f64 {
     eval_chebyt(n, 2.0 * x - 1.0)
 }
+/// Checked counterpart of [`eval_sh_chebyt`].
+pub fn try_eval_sh_chebyt(n: i32, x: f64) -> Result<f64> {
+    try_eval_chebyt(n, 2.0 * x - 1.0)
+}
 /// Shifted Chebyshev second kind, `U_n(2x-1)`.
 #[inline]
 pub fn eval_sh_chebyu(n: i32, x: f64) -> f64 {
     eval_chebyu(n, 2.0 * x - 1.0)
+}
+/// Checked counterpart of [`eval_sh_chebyu`].
+pub fn try_eval_sh_chebyu(n: i32, x: f64) -> Result<f64> {
+    try_eval_chebyu(n, 2.0 * x - 1.0)
 }
 /// Shifted Legendre polynomial, `P_n(2x-1)`.
 #[inline]
 pub fn eval_sh_legendre(n: i32, x: f64) -> f64 {
     eval_legendre(n, 2.0 * x - 1.0)
 }
+/// Checked counterpart of [`eval_sh_legendre`].
+pub fn try_eval_sh_legendre(n: i32, x: f64) -> Result<f64> {
+    try_eval_legendre(n, 2.0 * x - 1.0)
+}
 /// Shifted Jacobi `G_n^(p,q)(x) = n! Γ(n+p)/Γ(2n+p) P_n^(p-q,q-1)(2x-1)`.
 /// Requires `0<=n<=1_000_000`, `q>0`, `p-q>-1`, and finite `p,q`.
 pub fn eval_sh_jacobi(n: i32, p: f64, q: f64, x: f64) -> f64 {
+    try_eval_sh_jacobi(n, p, q, x).unwrap_or(f64::NAN)
+}
+
+/// Checked counterpart of [`eval_sh_jacobi`].
+/// Invalid parameters or degrees return [`Error::InvalidInput`].
+pub fn try_eval_sh_jacobi(n: i32, p: f64, q: f64, x: f64) -> Result<f64> {
     if !(0..=1_000_000).contains(&n)
         || !p.is_finite()
         || !q.is_finite()
+        || x.is_nan()
         || q <= 0.0
         || p - q <= -1.0
     {
-        return f64::NAN;
+        return Err(Error::InvalidInput(
+            "shifted Jacobi parameters or degree are outside the domain",
+        ));
     }
     if n == 0 {
-        return 1.0;
+        return Ok(1.0);
     }
     let nf = n as f64;
-    (gammaln(nf + 1.0) + gammaln(nf + p) - gammaln(2.0 * nf + p)).exp()
-        * eval_jacobi(n, p - q, q - 1.0, 2.0 * x - 1.0)
+    let scale = (gammaln(nf + 1.0) + gammaln(nf + p) - gammaln(2.0 * nf + p)).exp();
+    let value = scale * try_eval_jacobi(n, p - q, q - 1.0, 2.0 * x - 1.0)?;
+    if value.is_nan() {
+        Err(Error::NonFiniteEvaluation)
+    } else {
+        Ok(value)
+    }
 }
 
 /// All Legendre polynomial values `[P_0(x), ..., P_n(x)]` for `n <= 1_000_000`.
 ///
 /// Takes `O(n)` time and memory; the recurrence is stable on `[-1, 1]`.
 /// Outside this interval, values can overflow for large degrees.
-/// NaN inputs produce a table of NaNs.
+/// NaN inputs and excessive degrees return [`Error::InvalidInput`].
 pub fn legendre_p_all(n: usize, x: f64) -> Result<Vec<f64>> {
-    if n > 1_000_000 {
-        return Err(Error::InvalidInput("degree must not exceed 1,000,000"));
+    if n > 1_000_000 || x.is_nan() {
+        return Err(Error::InvalidInput(
+            "Legendre degree exceeds 1,000,000 or argument is NaN",
+        ));
     }
     Ok(evaluate::legendre_all(n, x))
 }

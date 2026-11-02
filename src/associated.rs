@@ -1,12 +1,14 @@
 //! Integer-degree associated Legendre functions and spherical harmonics.
-use crate::{StrErr, finish};
+use crate::{Error, Result, finish};
 use core::f64::consts::PI;
 use num_complex::Complex;
 use num_traits::Float;
 
-const ERROR: StrErr = "Associated Legendre functions require degree <= 1,000,000 and a finite argument in their domain.";
+const ERROR: Error = Error::InvalidInput(
+    "Associated Legendre functions require degree <= 1,000,000 and a finite argument in their domain.",
+);
 
-fn validate_degree(n: u32) -> Result<(), StrErr> {
+fn validate_degree(n: u32) -> Result<()> {
     if n > 1_000_000 { Err(ERROR) } else { Ok(()) }
 }
 
@@ -341,7 +343,9 @@ pub(crate) fn sph_legendre_table(n: usize, m: usize, theta: f64) -> Vec<Vec<f64>
 /// Requires integer `n <= 1_000_000` and `-1 <= x <= 1`. Negative orders use
 /// P_n^(-m) = (-1)^m (n-m)!/(n+m)! P_n^m; `|m| > n` returns zero.
 /// Factorials and tiny diagonal values are handled without intermediate overflow.
-pub fn assoc_legendre_p<T: Float>(n: u32, m: i32, x: T) -> Result<T, StrErr> {
+/// Returns [`Error::InvalidInput`] for inputs outside the domain and
+/// [`Error::NonFiniteEvaluation`] if the computed result is undefined.
+pub fn assoc_legendre_p<T: Float>(n: u32, m: i32, x: T) -> Result<T> {
     validate_degree(n)?;
     let x = x.to_f64().ok_or(ERROR)?;
     if !(-1.0..=1.0).contains(&x) {
@@ -349,7 +353,7 @@ pub fn assoc_legendre_p<T: Float>(n: u32, m: i32, x: T) -> Result<T, StrErr> {
     }
     finish(
         associated(n, m, x, ((1.0 - x) * (1.0 + x)).sqrt(), false),
-        ERROR,
+        Error::NonFiniteEvaluation,
     )
 }
 
@@ -358,7 +362,9 @@ pub fn assoc_legendre_p<T: Float>(n: u32, m: i32, x: T) -> Result<T, StrErr> {
 /// Equals sqrt((2n+1)/(4pi)*(n-m)!/(n+m)!) P_n^m(cos(theta)).
 /// Includes the Condon–Shortley phase. Requires `0 <= theta <= pi` and
 /// `n <= 1_000_000`; orders outside `-n..=n` return zero.
-pub fn sph_legendre_p<T: Float>(n: u32, m: i32, theta: T) -> Result<T, StrErr> {
+/// Returns [`Error::InvalidInput`] for inputs outside the domain and
+/// [`Error::NonFiniteEvaluation`] if the computed result is undefined.
+pub fn sph_legendre_p<T: Float>(n: u32, m: i32, theta: T) -> Result<T> {
     validate_degree(n)?;
     let theta = if theta == T::from(PI).ok_or(ERROR)? {
         PI
@@ -371,14 +377,18 @@ pub fn sph_legendre_p<T: Float>(n: u32, m: i32, theta: T) -> Result<T, StrErr> {
     let (sine, cosine) = theta.sin_cos();
     // pi denotes the exact south pole even though sin(pi) is rounded away from zero.
     let sine = if theta == PI { 0.0 } else { sine };
-    finish(associated(n, m, cosine, sine, true), ERROR)
+    finish(
+        associated(n, m, cosine, sine, true),
+        Error::NonFiniteEvaluation,
+    )
 }
 
 /// Complex spherical harmonic Y_n^m(theta,phi), with polar angle first.
 ///
 /// Uses spherical normalization and the Condon–Shortley phase. Requires
 /// `0 <= theta <= pi`, finite azimuth `phi`, and `n <= 1_000_000`.
-pub fn sph_harm_y<T: Float>(n: u32, m: i32, theta: T, phi: T) -> Result<Complex<T>, StrErr> {
+/// Invalid arguments return [`Error::InvalidInput`].
+pub fn sph_harm_y<T: Float>(n: u32, m: i32, theta: T, phi: T) -> Result<Complex<T>> {
     let amplitude = sph_legendre_p(n, m, theta)?;
     let phi = phi.to_f64().ok_or(ERROR)?;
     if !phi.is_finite() {

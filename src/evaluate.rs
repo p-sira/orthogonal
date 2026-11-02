@@ -2,7 +2,7 @@
 //!
 //! Kernels follow xsf/orthogonal_eval.h and evaluate in double precision.
 //! Degrees with absolute value above 1,000,000 return an error to bound recurrence work.
-use crate::{StrErr, finish};
+use crate::{Error, Result, finish};
 #[allow(unused_imports)]
 use num_traits::Float;
 
@@ -11,16 +11,16 @@ macro_rules! polynomial {
         $(#[$meta])*
         ///
         /// Returns an error for NaN input, undefined results, or |n| > 1,000,000.
-        pub fn $name<T: Float>($n: i32, $($arg: T),+) -> Result<T, StrErr> {
+        pub fn $name<T: Float>($n: i32, $($arg: T),+) -> Result<T> {
             if $n.unsigned_abs() > 1_000_000 {
-                return Err(concat!(stringify!($name), ": Invalid argument or degree exceeds 1,000,000."));
+                return Err(Error::InvalidInput(concat!(stringify!($name), ": Invalid argument or degree exceeds 1,000,000.")));
             }
             $(if $arg.is_nan() {
-                return Err(concat!(stringify!($name), ": Arguments cannot be NAN."));
+                return Err(Error::InvalidInput(concat!(stringify!($name), ": Arguments cannot be NAN.")));
             }
-            let $arg = $arg.to_f64().ok_or("Polynomial: Cannot represent argument as f64.")?;)+
+            let $arg = $arg.to_f64().ok_or(Error::InvalidInput("Polynomial: Cannot represent argument as f64."))?;)+
             let value: f64 = $body;
-            finish(value, concat!(stringify!($name), ": Undefined real result."))
+            finish(value, Error::InvalidInput(concat!(stringify!($name), ": Undefined real result.")))
         }
     };
 }
