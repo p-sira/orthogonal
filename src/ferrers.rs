@@ -37,7 +37,7 @@ pub fn lpmv(m: i32, v: f64, x: f64) -> f64 {
         return f64::NAN;
     }
     if v >= 0.0 && v.fract() == 0.0 && v <= 1_000_000.0 {
-        return super::assoc_legendre_p(v as u32, m, x).unwrap_or(f64::NAN);
+        return super::assoc_legendre_p(v as i32, m, x).unwrap_or(f64::NAN);
     }
     // Ferrers symmetry P_{-v-1}^m = P_v^m.
     let v = if v < -0.5 { -v - 1.0 } else { v };

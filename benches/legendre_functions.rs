@@ -11,17 +11,17 @@ mod scalar {
     use super::*;
 
     #[divan::bench(args = [(10, 3), (100, 50)])]
-    fn assoc_legendre_p((n, m): (u32, i32)) -> f64 {
+    fn assoc_legendre_p((n, m): (i32, i32)) -> f64 {
         orthogonal::assoc_legendre_p(black_box(n), black_box(m), black_box(0.4_f64)).unwrap()
     }
 
     #[divan::bench(args = [(10, 3), (100, 50)])]
-    fn sph_legendre_p((n, m): (u32, i32)) -> f64 {
+    fn sph_legendre_p((n, m): (i32, i32)) -> f64 {
         orthogonal::sph_legendre_p(black_box(n), black_box(m), black_box(1.1_f64)).unwrap()
     }
 
     #[divan::bench(args = [(10, 3), (100, 50)])]
-    fn sph_harm_y((n, m): (u32, i32)) -> num_complex::Complex<f64> {
+    fn sph_harm_y((n, m): (i32, i32)) -> num_complex::Complex<f64> {
         orthogonal::sph_harm_y(
             black_box(n),
             black_box(m),
