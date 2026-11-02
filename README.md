@@ -15,7 +15,7 @@
     </a>
 </p>
 
-Rust library for classical orthogonal polynomials, associated Legendre functions, spherical harmonics, and Gaussian quadrature.
+Pure Rust library for classical orthogonal polynomials, associated Legendre functions, spherical harmonics, and Gaussian quadrature.
 
 - Evaluate polynomials with `eval_*` or checked `try_eval_*` functions.
 - Construct polynomial coefficients with `legendre`, `jacobi`, and other families.
@@ -37,4 +37,4 @@ assert_eq!(nodes.len(), weights.len());
 
 `eval_*` functions return `NaN` for invalid inputs. Checked evaluations, coefficient constructors, and quadrature return `Result<_, orthogonal::Error>`. Coefficients are in descending powers; quadrature nodes are sorted ascending.
 
-See the [API documentation](https://docs.rs/orthogonal) for parameter domains, conventions, and numerical limitations. Definitions cross-checked against SciPy and the [NIST DLMF](https://dlmf.nist.gov/18).
+The definitions are cross-checked against SciPy and the [NIST DLMF](https://dlmf.nist.gov/18).
