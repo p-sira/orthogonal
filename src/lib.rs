@@ -322,7 +322,7 @@ pub fn sph_harm_y_all(
 /// `Q_n(-x)=(-1)^(n+1)Q_n(x)`. The recurrence is
 /// `(n+1)Q_(n+1)=(2n+1)x Q_n-n Q_(n-1)` on either branch.
 ///
-/// Requires `n <= 128` and finite `x != ±1`; these endpoints are logarithmic
+/// Requires `n <= 4096` and finite `x != ±1`; these endpoints are logarithmic
 /// singularities. The exterior branch uses a continued fraction for the
 /// minimal solution to prevent the growing Legendre P solution from corrupting
 /// high-degree Q values. Results may underflow to zero at very large `|x|`.
@@ -337,9 +337,9 @@ pub fn sph_harm_y_all(
 /// # Ok::<(), orthogonal::Error>(())
 /// ```
 pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
-    if n > 128 || !x.is_finite() || x.abs() == 1.0 {
+    if n > 4096 || !x.is_finite() || x.abs() == 1.0 {
         return Err(Error::InvalidInput(
-            "Legendre Q requires n<=128, finite x != ±1",
+            "Legendre Q requires n<=4096, finite x != ±1",
         ));
     }
     let mut q = vec![0.0; n + 1];
@@ -408,25 +408,29 @@ pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
     Ok((q, d))
 }
 
-/// Associated real Ferrers `Q_k^j(x)` and their first derivatives.
+/// Associated real Legendre `Q_k^j(x)` and their first derivatives.
 ///
 /// The returned `(values,derivatives)` matrices have `m+1` order rows and
-/// `n+1` degree columns, with the associated (Condon–Shortley) phase.
-/// Requires `m,n <= 128`, `-1 < x < 1` for positive orders. For `m=0`,
-/// also supports the real exterior `|x|>1` as [`lqn`]. At the endpoints,
-/// these functions diverge and are undefined.
+/// `n+1` degree columns, with the associated (Condon–Shortley) phase in the
+/// Ferrers interior `-1 < x < 1`. The real exterior `|x| > 1` is also supported,
+/// using real Legendre Q conventions and reflection across negative `x`.
+/// Requires `m,n <= 4096`, `(m+1)*(n+1) <= 1_048_576`, and finite `x != ±1`.
+/// Unrepresentably large values or derivatives return [`Error::NonFiniteEvaluation`].
 ///
 /// # References
 /// NIST DLMF Chapter 14 and [SciPy `lqmn`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.lqmn.html).
 pub fn lqmn(m: usize, n: usize, x: f64) -> Result<ValueDerivativeMatrices> {
-    if n > 128 || m > 128 || !x.is_finite() || x.abs() == 1.0 || (m > 0 && x.abs() > 1.0) {
+    if n > 4096 || m > 4096 || (n + 1) * (m + 1) > 1_048_576 || !x.is_finite() || x.abs() == 1.0 {
         return Err(Error::InvalidInput(
-            "associated Legendre Q requires m,n<=128; positive orders require -1<x<1",
+            "associated Legendre Q requires m,n<=4096, at most 1,048,576 elements, finite x != ±1",
         ));
     }
     if m == 0 {
         let (values, slopes) = lqn(n, x)?;
         return Ok((vec![values], vec![slopes]));
+    }
+    if x.abs() > 1.0 {
+        return associated_q_exterior(m, n, x);
     }
     let mut values = vec![vec![0.0; n + 1]; m + 1];
     let mut slopes = vec![vec![0.0; n + 1]; m + 1];
@@ -480,6 +484,153 @@ pub fn lqmn(m: usize, n: usize, x: f64) -> Result<ValueDerivativeMatrices> {
         .chain(&slopes)
         .flatten()
         .any(|x| !x.is_finite())
+    {
+        return Err(Error::NonFiniteEvaluation);
+    }
+    Ok((values, slopes))
+}
+
+// On the exterior branch Q_n is the minimal solution in degree, while its
+// associated orders grow roughly factorially. Compute Q_n and Q_n^1/Q_n once
+// per degree, then advance through the orders with one scaled recurrence.
+// Keeping log|Q_n| separately permits an associated value to become
+// representable even when the unassociated Q_n has underflowed to zero.
+fn associated_q_exterior(m: usize, n: usize, x: f64) -> Result<ValueDerivativeMatrices> {
+    let a = x.abs();
+    let acosh = a.acosh();
+    let q0 = 0.5 * (2.0 / (a - 1.0)).ln_1p();
+    let inverse_a = 1.0 / a;
+    let inverse_a_squared = inverse_a * inverse_a;
+    // The difference of adjacent exterior arguments is exact near a=1.
+    // The scaled form prevents a*a from overflowing for very large a.
+    let root = if a < 1e150 {
+        ((a - 1.0) * (a + 1.0)).sqrt()
+    } else {
+        a * ((1.0 - inverse_a) * (1.0 + inverse_a)).sqrt()
+    };
+    let reciprocal_root = 1.0 / root;
+    let a_over_root_squared = if a < 1e150 {
+        a / ((a - 1.0) * (a + 1.0))
+    } else {
+        inverse_a / ((1.0 - inverse_a) * (1.0 + inverse_a))
+    };
+    let mut values = vec![vec![0.0; n + 1]; m + 1];
+    let mut slopes = vec![vec![0.0; n + 1]; m + 1];
+
+    // Near the logarithmic endpoint forward degree recurrence is stable.
+    // It also avoids a potentially enormous Miller depth when acosh(a) -> 0.
+    let near_endpoint = n as f64 * acosh <= 1.0;
+    let mut logs = vec![0.0; n + 1];
+    let mut first_orders = vec![0.0; n + 1];
+    if n == 0 {
+        // The degree-zero derivative can underflow long before Q_0^1/Q_0
+        // does, so use its closed form for all exterior arguments.
+        logs[0] = q0.ln();
+        first_orders[0] = -1.0 / (root * q0);
+    } else if near_endpoint {
+        let mut q = vec![0.0; n + 1];
+        let mut derivatives = vec![0.0; n + 1];
+        q[0] = q0;
+        derivatives[0] = -a_over_root_squared / a;
+        if n > 0 {
+            q[1] = a * q0 - 1.0;
+            derivatives[1] = q0 + a * derivatives[0];
+        }
+        for k in 2..=n {
+            let d = k as f64;
+            q[k] = ((2.0 * d - 1.0) * a * q[k - 1] - (d - 1.0) * q[k - 2]) / d;
+            derivatives[k] = ((2.0 * d - 1.0) * (q[k - 1] + a * derivatives[k - 1])
+                - (d - 1.0) * derivatives[k - 2])
+                / d;
+        }
+        for k in 0..=n {
+            logs[k] = q[k].ln();
+            first_orders[k] = root * derivatives[k] / q[k];
+        }
+    } else {
+        // Store x*Q_k/Q_(k-1): unlike Q_k/Q_(k-1), these ratios remain
+        // representable for x close to f64::MAX.
+        let guard = (20.0 / acosh).ceil().max(32.0) as usize;
+        let mut scaled_ratios = vec![0.0; n + 1];
+        let mut next_ratio = 0.0;
+        for k in (1..=n + guard).rev() {
+            let d = k as f64;
+            next_ratio = d / (2.0 * d + 1.0 - (d + 1.0) * next_ratio * inverse_a_squared);
+            if k <= n {
+                scaled_ratios[k] = next_ratio;
+            }
+        }
+        logs[0] = q0.ln();
+        for k in 1..=n {
+            logs[k] = logs[k - 1] + scaled_ratios[k].ln() - a.ln();
+        }
+        first_orders[0] = -1.0 / (root * q0);
+        for k in 1..=n {
+            first_orders[k] = k as f64 * a * reciprocal_root * (1.0 - 1.0 / scaled_ratios[k]);
+        }
+    }
+
+    // Exterior Q_n^m = (a²-1)^(m/2) d^m Q_n/da^m. With p_m=Q_n^m/Q_n:
+    // p_(m+2) = -2(m+1)*a/root*p_(m+1)
+    //           + (n+m+1)(n-m)*p_m.
+    // Its derivative is m*a/(a²-1)*Q_n^m + Q_n^(m+1)/root.
+    // Form both values in the shared scaled representation before converting
+    // to f64: a tiny Q_n can have a representable Q_n^m or derivative.
+    const LOG_SCALE: f64 = 150.0 * std::f64::consts::LN_10;
+    let from_scaled = |base: f64, scale: f64, mantissa: f64| {
+        if mantissa == 0.0 {
+            0.0
+        } else {
+            (base + scale + mantissa.abs().ln())
+                .exp()
+                .copysign(mantissa)
+        }
+    };
+    for degree in 0..=n {
+        let mut previous = 1.0;
+        let mut current = first_orders[degree];
+        let mut scale = 0.0;
+        for order in 0..=m {
+            let magnitude = previous.abs().max(current.abs());
+            if magnitude > 1e150 {
+                previous *= 1e-150;
+                current *= 1e-150;
+                scale += LOG_SCALE;
+            } else if magnitude != 0.0 && magnitude < 1e-150 {
+                previous *= 1e150;
+                current *= 1e150;
+                scale -= LOG_SCALE;
+            }
+            let derivative =
+                order as f64 * a_over_root_squared * previous + reciprocal_root * current;
+            let mut value = from_scaled(logs[degree], scale, previous);
+            let mut slope = from_scaled(logs[degree], scale, derivative);
+            if x < 0.0 {
+                if (degree + order) % 2 == 0 {
+                    value = -value;
+                } else {
+                    slope = -slope;
+                }
+            }
+            values[order][degree] = value;
+            slopes[order][degree] = slope;
+
+            if order < m {
+                let next_order = order as f64 + 2.0;
+                let next = -2.0 * (next_order - 1.0) * a * reciprocal_root * current
+                    + (degree as f64 + next_order - 1.0)
+                        * (degree as f64 - next_order + 2.0)
+                        * previous;
+                previous = current;
+                current = next;
+            }
+        }
+    }
+    if values
+        .iter()
+        .chain(&slopes)
+        .flatten()
+        .any(|value| !value.is_finite())
     {
         return Err(Error::NonFiniteEvaluation);
     }
