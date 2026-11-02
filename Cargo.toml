@@ -14,3 +14,18 @@ include = ["/src/**", "/README.md", "/LICENSE"]
 [dependencies]
 num-complex = "0.4"
 num-traits = "0.2"
+
+[dev-dependencies]
+divan = { version = "6.0.0", package = "codspeed-divan-compat" }
+
+[[bench]]
+name = "evaluate"
+harness = false
+
+[[bench]]
+name = "coefficients"
+harness = false
+
+[[bench]]
+name = "legendre_functions"
+harness = false
