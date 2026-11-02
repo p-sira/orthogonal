@@ -31,9 +31,25 @@ mod scalar {
         .unwrap()
     }
 
-    #[divan::bench(args = [(3, 10.0), (20, 55.5)])]
-    fn lpmv((m, v): (i32, f64)) -> f64 {
-        orthogonal::lpmv(black_box(m), black_box(v), black_box(0.4))
+    // Only compare inputs that were supported before the domain extension.
+    // The old lpmv(20, 55.5, 0.4) returned NaN immediately, so comparing
+    // its old runtime with a finite result produces a vacuous regression.
+    #[divan::bench(args = [(3, 10.0), (3, 10.5), (6, 25.25)])]
+    fn lpmv(bencher: divan::Bencher, (m, v): (i32, f64)) {
+        assert!(orthogonal::lpmv(m, v, 0.4).is_finite());
+        bencher.bench_local(|| orthogonal::lpmv(black_box(m), black_box(v), black_box(0.4)));
+    }
+
+    // Track performance of the newly supported real-degree/order range
+    // separately, and check the computed value before timing the kernel.
+    #[divan::bench(args = [
+        (20, 55.5, 0.4),
+        (20, 55.5, 0.999999),
+        (3, 100.25, -0.7),
+    ])]
+    fn lpmv_extended(bencher: divan::Bencher, (m, v, x): (i32, f64, f64)) {
+        assert!(orthogonal::lpmv(m, v, x).is_finite());
+        bencher.bench_local(|| orthogonal::lpmv(black_box(m), black_box(v), black_box(x)));
     }
 }
 

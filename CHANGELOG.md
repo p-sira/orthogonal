@@ -4,6 +4,14 @@
 
 ### 0.2.0
 
+**Performance**
+- `lpmv`: Avoid expensive high-order hypergeometric seeds for well-conditioned interior arguments by combining a stable degree recurrence with one associated-order recurrence; preserve direct evaluation near the positive endpoint to avoid cancellation.
+- Keep previously supported and newly supported `lpmv` inputs in separate benchmark groups; the original benchmark measured `NaN` rejection, not a valid function evaluation.
+
+**Bug Fixes**
+- `lqn` and `lqmn`: Restore Sci-compatible degree and order limits up to 4096 and the established matrix-size bound; support the real exterior associated-Q branch for positive orders.
+- `lpmv`: Restore the documented Sci real-degree and integer-order input domain, including noninteger degrees near the negative endpoint.
+
 **Breaking Changes**
 - `assoc_legendre_p`, `sph_legendre_p`, and `sph_harm_y`: Accept signed `i32` degrees instead of `u32`, consistently with scalar polynomial evaluators. Negative degrees are rejected with `Error::InvalidInput` rather than requiring callers to convert a signed degree; nonnegative degrees use the same internal recurrences.
 
