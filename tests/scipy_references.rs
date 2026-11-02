@@ -95,8 +95,8 @@ fn all_saved_scipy_reference_values() {
             "coeff" => coeff(fields[2], n, a, b, monic),
             "roots" => roots(fields[2], n, a, b),
             "eval" => vec![eval(fields[2], n as i32, a, b, x)],
-            "assoc" => vec![assoc_legendre_p(n as u32, a as i32, x).unwrap()],
-            "spherical" => vec![sph_legendre_p(n as u32, a as i32, x).unwrap()],
+            "assoc" => vec![assoc_legendre_p(n as i32, a as i32, x).unwrap()],
+            "spherical" => vec![sph_legendre_p(n as i32, a as i32, x).unwrap()],
             "q" => {
                 let (v, d) = lqn(n, x).unwrap();
                 v.into_iter().chain(d).collect()
@@ -201,7 +201,7 @@ fn legendre_and_associated_table_entries_match_scalar_evaluators() {
                 } else {
                     column as i32 - 11
                 };
-                let scalar = assoc_legendre_p(n as u32, order, x).unwrap();
+                let scalar = assoc_legendre_p(n as i32, order, x).unwrap();
                 assert!(
                     (value - scalar).abs() < 2e-10 * (1.0 + scalar.abs()),
                     "n={n},m={order},x={x}"
@@ -226,6 +226,24 @@ fn rejects_out_of_domain_inputs_and_degrees() {
     assert!(eval_legendre(4097, 0.5_f64).is_finite());
     assert!(eval_jacobi(2, -1.0_f64, 0.2, 0.4).is_nan());
     assert!(eval_chebyt(2, f64::NAN).is_nan());
+    let signed_degree: i32 = 3;
+    assert!(assoc_legendre_p(signed_degree, 1, 0.5_f64).is_ok());
+    assert!(sph_legendre_p(signed_degree, -1, 0.5_f64).is_ok());
+    assert!(sph_harm_y(signed_degree, 1, 0.5_f64, 0.3).is_ok());
+    for invalid_degree in [-1, i32::MIN, 1_000_001, i32::MAX] {
+        assert!(matches!(
+            assoc_legendre_p(invalid_degree, 1, 0.5_f64),
+            Err(Error::InvalidInput(_))
+        ));
+        assert!(matches!(
+            sph_legendre_p(invalid_degree, -1, 0.5_f64),
+            Err(Error::InvalidInput(_))
+        ));
+        assert!(matches!(
+            sph_harm_y(invalid_degree, 1, 0.5_f64, 0.3),
+            Err(Error::InvalidInput(_))
+        ));
+    }
     assert!(assoc_legendre_p(2, 1, 2.0_f64).is_err());
     assert!(sph_legendre_p(2, 1, -0.1_f64).is_err());
     let converted: f32 = eval_legendre(3, 0.3_f32);
@@ -248,7 +266,7 @@ fn spherical_harmonics_match_condon_shortley_phase_and_table_layout() {
                     } else {
                         index as i32 - 7
                     };
-                    let scalar = sph_harm_y(degree as u32, order, theta, phi).unwrap();
+                    let scalar = sph_harm_y(degree as i32, order, theta, phi).unwrap();
                     assert!((value.re - scalar.re).abs() < 3e-12 * (1.0 + scalar.re.abs()));
                     assert!((value.im - scalar.im).abs() < 3e-12 * (1.0 + scalar.im.abs()));
                 }

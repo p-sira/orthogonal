@@ -1,10 +1,14 @@
 [package]
 name = "orthogonal"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
-authors = ["Sira Pornsiriprasert"]
+authors = ["Sira Pornsiriprasert <code@psira.me>"]
+documentation = "https://docs.rs/orthogonal"
+homepage = "https://github.com/p-sira/orthogonal"
+repository = "https://github.com/p-sira/orthogonal"
 license = "BSD-3-Clause"
+
 description = "Classical orthogonal polynomials, associated Legendre functions and Gaussian quadrature"
 readme = "README.md"
 keywords = ["orthogonal", "polynomials", "legendre", "quadrature", "numerics"]

@@ -142,9 +142,13 @@ fn exterior_branch_symmetries_domains_and_normalization() {
         assert!(lqn(0, x).is_err());
         assert!(lqmn(0, 2, x).is_err());
     }
-    assert!(lqmn(1, 2, 2.0).is_err());
-    assert!(lqn(129, 0.3).is_err());
-    assert!(lqmn(129, 2, 0.3).is_err());
+    assert!(lqmn(1, 2, 2.0).is_ok());
+    assert!(lqn(129, 0.3).is_ok());
+    assert!(lqn(4096, 0.3).is_ok());
+    assert!(lqmn(2, 129, 0.3).is_ok());
+    assert!(lqn(4097, 0.3).is_err());
+    assert!(lqmn(2, 4097, 0.3).is_err());
+    assert!(lqmn(4096, 4096, 0.3).is_err());
     assert_eq!(eval_sh_jacobi(0, -0.25, 0.5, 0.3), 1.0);
     assert!(eval_sh_jacobi(0, -1.0, 0.5, 0.3).is_nan());
 }
