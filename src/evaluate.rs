@@ -465,37 +465,56 @@ pub(crate) fn shifted_jacobi_monic(n: i32, p: f64, q: f64, x: f64) -> f64 {
     debug_assert!(n > 0 && q > 0.0 && p - q > -1.0);
     let mut previous = 1.0;
     let mut value = x - q / (p + 1.0);
-    // For ordinary-sized parameters, the direct rational coefficients use
-    // just two divisions per step. The fourth-degree denominator and
-    // numerator remain below f64::MAX even at the maximum supported degree.
-    // For huge finite parameters, use factored ratios instead so neither
-    // intermediate product overflows.
-    let direct_coefficients = p <= 1e50 && q <= 1e50;
-    for k in 1..n {
-        let k = k as f64;
-        let t = 2.0 * k + p - 1.0;
-        let a = if k == 1.0 {
-            // The general expression loses digits when p -> -1.
-            (2.0 + (q / (p + 1.0)) * (p - 1.0)) / (p + 3.0)
-        } else if direct_coefficients {
-            (2.0 * k * (k + p) + q * (p - 1.0)) / (t * (t + 2.0))
-        } else {
+    if n == 1 {
+        return value;
+    }
+    // Peel k=1: the general expressions lose digits when p -> -1 and the
+    // B_1 expression has a removable 0/0 at p=0.
+    {
+        let u = p + 1.0;
+        let a = (2.0 + (q / u) * (p - 1.0)) / (p + 3.0);
+        let b = (q / u) * ((u - q) / u) / (p + 2.0);
+        let next = (x - a) * value - b * previous;
+        previous = value;
+        value = next;
+    }
+    // For ordinary-sized parameters, use A_k = 1/2 + C/(t(t+2)) with the
+    // loop-invariant C = (2q-p-1)(p-1)/2, and the factored B_k numerator over
+    // t^2(t^2-1), where t = 2k+p-1. With p,q <= 1e50 and n <= 1e6, these
+    // degree-4 products remain far below f64::MAX. For huge finite
+    // parameters, use factored ratios instead so no intermediate overflows.
+    //
+    // Plain multiply/subtract is used rather than `mul_add`: without a
+    // hardware FMA target feature, `mul_add` is a software library call.
+    if p <= 1e50 && q <= 1e50 {
+        let c = 0.5 * ((2.0 * q - p - 1.0) * (p - 1.0));
+        let (pq, q1, p1) = (p - q, q - 1.0, p - 1.0);
+        for k in 2..n {
+            let k = k as f64;
+            let t = 2.0 * k + p1;
+            let t2 = t * t;
+            let a = 0.5 + c / (t2 + 2.0 * t);
+            let b = (k * (k + p1) * (k + pq) * (k + q1)) / (t2 * (t2 - 1.0));
+            let next = (x - a) * value - b * previous;
+            previous = value;
+            value = next;
+        }
+    } else {
+        for k in 2..n {
+            let k = k as f64;
+            let t = 2.0 * k + p - 1.0;
             // Divide first: 2*q can overflow even though the coefficient
             // stays bounded when p and q are both very large.
             let u = t + 2.0;
-            0.5 * (1.0 + (2.0 * (q / u) - (p + 1.0) / u) * ((p - 1.0) / t))
-        };
-        let b = if k == 1.0 {
-            let u = p + 1.0;
-            (q / u) * ((u - q) / u) / (p + 2.0)
-        } else if direct_coefficients {
-            (k * (k + p - q) * (k + q - 1.0) * (k + p - 1.0)) / (t * t * (t - 1.0) * (t + 1.0))
-        } else {
-            (k / t) * ((k + p - q) / t) * ((k + q - 1.0) / (t - 1.0)) * ((k + p - 1.0) / (t + 1.0))
-        };
-        let next = (x - a).mul_add(value, -b * previous);
-        previous = value;
-        value = next;
+            let a = 0.5 * (1.0 + (2.0 * (q / u) - (p + 1.0) / u) * ((p - 1.0) / t));
+            let b = (k / t)
+                * ((k + p - q) / t)
+                * ((k + q - 1.0) / (t - 1.0))
+                * ((k + p - 1.0) / (t + 1.0));
+            let next = (x - a) * value - b * previous;
+            previous = value;
+            value = next;
+        }
     }
     value
 }
