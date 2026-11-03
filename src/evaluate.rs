@@ -465,12 +465,20 @@ pub(crate) fn shifted_jacobi_monic(n: i32, p: f64, q: f64, x: f64) -> f64 {
     debug_assert!(n > 0 && q > 0.0 && p - q > -1.0);
     let mut previous = 1.0;
     let mut value = x - q / (p + 1.0);
+    // For ordinary-sized parameters, the direct rational coefficients use
+    // just two divisions per step. The fourth-degree denominator and
+    // numerator remain below f64::MAX even at the maximum supported degree.
+    // For huge finite parameters, use factored ratios instead so neither
+    // intermediate product overflows.
+    let direct_coefficients = p <= 1e50 && q <= 1e50;
     for k in 1..n {
         let k = k as f64;
         let t = 2.0 * k + p - 1.0;
         let a = if k == 1.0 {
             // The general expression loses digits when p -> -1.
             (2.0 + (q / (p + 1.0)) * (p - 1.0)) / (p + 3.0)
+        } else if direct_coefficients {
+            (2.0 * k * (k + p) + q * (p - 1.0)) / (t * (t + 2.0))
         } else {
             // Divide first: 2*q can overflow even though the coefficient
             // stays bounded when p and q are both very large.
@@ -480,6 +488,8 @@ pub(crate) fn shifted_jacobi_monic(n: i32, p: f64, q: f64, x: f64) -> f64 {
         let b = if k == 1.0 {
             let u = p + 1.0;
             (q / u) * ((u - q) / u) / (p + 2.0)
+        } else if direct_coefficients {
+            (k * (k + p - q) * (k + q - 1.0) * (k + p - 1.0)) / (t * t * (t - 1.0) * (t + 1.0))
         } else {
             (k / t) * ((k + p - q) / t) * ((k + q - 1.0) / (t - 1.0)) * ((k + p - 1.0) / (t + 1.0))
         };
