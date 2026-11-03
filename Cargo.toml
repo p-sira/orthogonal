@@ -13,7 +13,7 @@ description = "Classical orthogonal polynomials, associated Legendre functions a
 readme = "README.md"
 keywords = ["orthogonal", "polynomials", "legendre", "quadrature", "numerics"]
 categories = ["mathematics", "science"]
-include = ["/src/**", "/LICENSE", "/CHANGELOG.md"]
+include = ["/src/**", "/LICENSE"]
 
 [dependencies]
 num-complex = "0.4"
