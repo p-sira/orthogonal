@@ -452,6 +452,43 @@ fn jacobi(n: i32, alpha: f64, beta: f64, x: f64) -> f64 {
 
 // Monic shifted-Jacobi recurrence. Cancelling the binomial normalization in
 // each step avoids overflow of both numerator and denominator at large degree.
+//
+// The weight is x^(q-1) (1-x)^(p-q), so the Jacobi parameters on [-1,1]
+// are alpha=p-q, beta=q-1. The usual *monic* Jacobi recurrence transferred
+// to x=(t+1)/2 is G_(k+1)=(x-A_k)G_k-B_k G_(k-1), with
+// A_k = (1 + (2q-p-1)(p-1)/[(2k+p-1)(2k+p+1)])/2,
+// B_k = k(k+p-q)(k+q-1)(k+p-1)/
+//       [(2k+p-1)^2(2k+p-2)(2k+p)].
+// The k=1 B_k expression has a removable 0/0 at p=0, hence its
+// separately simplified form. Factor ratios to avoid overflow at large k.
+pub(crate) fn shifted_jacobi_monic(n: i32, p: f64, q: f64, x: f64) -> f64 {
+    debug_assert!(n > 0 && q > 0.0 && p - q > -1.0);
+    let mut previous = 1.0;
+    let mut value = x - q / (p + 1.0);
+    for k in 1..n {
+        let k = k as f64;
+        let t = 2.0 * k + p - 1.0;
+        let a = if k == 1.0 {
+            // The general expression loses digits when p -> -1.
+            (2.0 + (q / (p + 1.0)) * (p - 1.0)) / (p + 3.0)
+        } else {
+            // Divide first: 2*q can overflow even though the coefficient
+            // stays bounded when p and q are both very large.
+            let u = t + 2.0;
+            0.5 * (1.0 + (2.0 * (q / u) - (p + 1.0) / u) * ((p - 1.0) / t))
+        };
+        let b = if k == 1.0 {
+            let u = p + 1.0;
+            (q / u) * ((u - q) / u) / (p + 2.0)
+        } else {
+            (k / t) * ((k + p - q) / t) * ((k + q - 1.0) / (t - 1.0)) * ((k + p - 1.0) / (t + 1.0))
+        };
+        let next = (x - a).mul_add(value, -b * previous);
+        previous = value;
+        value = next;
+    }
+    value
+}
 
 polynomial! {
     /// Legendre polynomial P_n(x), with P_{-n-1} = P_n.

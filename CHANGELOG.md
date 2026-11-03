@@ -2,6 +2,17 @@
 
 ## 0.2
 
+### 0.2.1 (unreleased)
+
+**Performance Improvements**
+- `eval_sh_jacobi`, `try_eval_sh_jacobi`: Evaluate monic shifted-Jacobi polynomials directly by a three-term recurrence, removing three log-gamma evaluations and intermediate normalization per call.
+
+**Bug Fixes**
+- Preserve small, representable shifted-Jacobi endpoint values near admissible parameter boundaries with direct product formulas, avoiding recurrence cancellation.
+
+**Tests**
+- Compare shifted-Jacobi values with independently generated 110-digit mpmath Jacobi/Gamma references across degrees, parameter boundaries, endpoints, and interior/exterior arguments.
+
 ### 0.2.0
 
 **Performance**
