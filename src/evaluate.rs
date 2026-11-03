@@ -452,6 +452,72 @@ fn jacobi(n: i32, alpha: f64, beta: f64, x: f64) -> f64 {
 
 // Monic shifted-Jacobi recurrence. Cancelling the binomial normalization in
 // each step avoids overflow of both numerator and denominator at large degree.
+//
+// The weight is x^(q-1) (1-x)^(p-q), so the Jacobi parameters on [-1,1]
+// are alpha=p-q, beta=q-1. The usual *monic* Jacobi recurrence transferred
+// to x=(t+1)/2 is G_(k+1)=(x-A_k)G_k-B_k G_(k-1), with
+// A_k = (1 + (2q-p-1)(p-1)/[(2k+p-1)(2k+p+1)])/2,
+// B_k = k(k+p-q)(k+q-1)(k+p-1)/
+//       [(2k+p-1)^2(2k+p-2)(2k+p)].
+// The k=1 B_k expression has a removable 0/0 at p=0, hence its
+// separately simplified form. Factor ratios to avoid overflow at large k.
+pub(crate) fn shifted_jacobi_monic(n: i32, p: f64, q: f64, x: f64) -> f64 {
+    debug_assert!(n > 0 && q > 0.0 && p - q > -1.0);
+    let mut previous = 1.0;
+    let mut value = x - q / (p + 1.0);
+    if n == 1 {
+        return value;
+    }
+    // Peel k=1: the general expressions lose digits when p -> -1 and the
+    // B_1 expression has a removable 0/0 at p=0.
+    {
+        let u = p + 1.0;
+        let a = (2.0 + (q / u) * (p - 1.0)) / (p + 3.0);
+        let b = (q / u) * ((u - q) / u) / (p + 2.0);
+        let next = (x - a) * value - b * previous;
+        previous = value;
+        value = next;
+    }
+    // For ordinary-sized parameters, use A_k = 1/2 + C/(t(t+2)) with the
+    // loop-invariant C = (2q-p-1)(p-1)/2, and the factored B_k numerator over
+    // t^2(t^2-1), where t = 2k+p-1. With p,q <= 1e50 and n <= 1e6, these
+    // degree-4 products remain far below f64::MAX. For huge finite
+    // parameters, use factored ratios instead so no intermediate overflows.
+    //
+    // Plain multiply/subtract is used rather than `mul_add`: without a
+    // hardware FMA target feature, `mul_add` is a software library call.
+    if p <= 1e50 && q <= 1e50 {
+        let c = 0.5 * ((2.0 * q - p - 1.0) * (p - 1.0));
+        let (pq, q1, p1) = (p - q, q - 1.0, p - 1.0);
+        for k in 2..n {
+            let k = k as f64;
+            let t = 2.0 * k + p1;
+            let t2 = t * t;
+            let a = 0.5 + c / (t2 + 2.0 * t);
+            let b = (k * (k + p1) * (k + pq) * (k + q1)) / (t2 * (t2 - 1.0));
+            let next = (x - a) * value - b * previous;
+            previous = value;
+            value = next;
+        }
+    } else {
+        for k in 2..n {
+            let k = k as f64;
+            let t = 2.0 * k + p - 1.0;
+            // Divide first: 2*q can overflow even though the coefficient
+            // stays bounded when p and q are both very large.
+            let u = t + 2.0;
+            let a = 0.5 * (1.0 + (2.0 * (q / u) - (p + 1.0) / u) * ((p - 1.0) / t));
+            let b = (k / t)
+                * ((k + p - q) / t)
+                * ((k + q - 1.0) / (t - 1.0))
+                * ((k + p - 1.0) / (t + 1.0));
+            let next = (x - a) * value - b * previous;
+            previous = value;
+            value = next;
+        }
+    }
+    value
+}
 
 polynomial! {
     /// Legendre polynomial P_n(x), with P_{-n-1} = P_n.

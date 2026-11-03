@@ -1,6 +1,6 @@
 [package]
 name = "orthogonal"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.89"
 authors = ["Sira Pornsiriprasert <code@psira.me>"]
@@ -13,7 +13,7 @@ description = "Classical orthogonal polynomials, associated Legendre functions a
 readme = "README.md"
 keywords = ["orthogonal", "polynomials", "legendre", "quadrature", "numerics"]
 categories = ["mathematics", "science"]
-include = ["/src/**", "/LICENSE"]
+include = ["/src/**", "/LICENSE", "/CHANGELOG.md"]
 
 [dependencies]
 num-complex = "0.4"

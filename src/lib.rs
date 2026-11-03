@@ -239,9 +239,35 @@ pub fn try_eval_sh_jacobi(n: i32, p: f64, q: f64, x: f64) -> Result<f64> {
     if n == 0 {
         return Ok(1.0);
     }
-    let nf = n as f64;
-    let scale = (gammaln(nf + 1.0) + gammaln(nf + p) - gammaln(2.0 * nf + p)).exp();
-    let value = scale * try_eval_jacobi(n, p - q, q - 1.0, 2.0 * x - 1.0)?;
+    if x.is_infinite() {
+        // A monic polynomial has the sign of x^n at infinite arguments.
+        // Handle this before the recurrence to avoid Inf - Inf at degree 3+.
+        return Ok(if x.is_sign_negative() && n % 2 != 0 {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        });
+    }
+    // The monic endpoint values are products of beta-weight ratios. They
+    // avoid subtractive cancellation in the recurrence close to p=-1 or
+    // q=0 (including a representably tiny but nonzero endpoint value).
+    if x == 0.0 || x == 1.0 {
+        let mut value = 1.0;
+        let numerator = if x == 0.0 { q } else { (p + 1.0) - q };
+        for k in 0..n {
+            let k = k as f64;
+            value *= (numerator + k) / (p + n as f64 + k);
+        }
+        if x == 0.0 && n % 2 != 0 {
+            value = -value;
+        }
+        return Ok(value);
+    }
+    // The gamma ratio makes the shifted Jacobi polynomial monic. Evaluate
+    // that monic polynomial directly: otherwise the ratio can underflow while
+    // the unscaled Jacobi polynomial overflows, and each call pays for three
+    // log-gamma evaluations.
+    let value = evaluate::shifted_jacobi_monic(n, p, q, x);
     if value.is_nan() {
         Err(Error::NonFiniteEvaluation)
     } else {
