@@ -11,6 +11,16 @@ const QUAD_DEGREES: &[usize] = &[10, 100, 500];
 mod coefficients {
     use super::*;
 
+    #[divan::bench(args = [64, 128, 256])]
+    fn legendre_large(n: usize) -> Vec<f64> {
+        orthogonal::legendre(black_box(n), false).unwrap()
+    }
+
+    #[divan::bench(args = [64, 128, 256])]
+    fn jacobi_large(n: usize) -> Vec<f64> {
+        orthogonal::jacobi(black_box(n), 0.5, 0.25, false).unwrap()
+    }
+
     #[divan::bench(args = COEFF_DEGREES)]
     fn legendre(n: usize) -> Vec<f64> {
         orthogonal::legendre(black_box(n), false).unwrap()

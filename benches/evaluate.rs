@@ -58,3 +58,18 @@ eval_bench!(sh_jacobi, points, |n, x| eval_sh_jacobi(
 fn legendre_p_all(n: usize) -> Vec<f64> {
     orthogonal::legendre_p_all(black_box(n), black_box(0.3)).unwrap()
 }
+
+// The previous zero-table path evaluated each degree separately. Keep a
+// matched scalar baseline to expose the O(n) exact-zero recurrence speedup.
+#[divan::bench(args = [128, 512, 2048])]
+fn legendre_p_all_zero(n: usize) -> Vec<f64> {
+    orthogonal::legendre_p_all(black_box(n), black_box(-0.0)).unwrap()
+}
+
+#[divan::bench(args = [128, 512, 2048])]
+fn legendre_zero_scalar_reference(n: usize) -> Vec<f64> {
+    let x = black_box(-0.0);
+    (0..=black_box(n))
+        .map(|degree| orthogonal::eval_legendre(degree as i32, x))
+        .collect()
+}

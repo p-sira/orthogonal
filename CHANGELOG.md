@@ -5,6 +5,7 @@
 ### 0.2.1
 
 **Performance Improvements**
+- Reuse recurrence buffers during polynomial coefficient construction; avoid redundant polynomial transforms for identity mappings. Build associated-Legendre and spherical-harmonic tables by shared per-order recurrences, and evaluate Legendre tables at zero by an exact O(n) even-degree recurrence. Add larger-degree CodSpeed workloads and independent parity checks.
 - `eval_sh_jacobi`, `try_eval_sh_jacobi`: Evaluate monic shifted-Jacobi polynomials directly by a three-term recurrence, removing three log-gamma evaluations and intermediate normalization per call. Use direct, low-division coefficients for ordinary parameters and overflow-safe factored ratios for extreme parameters, improving short and long recurrences.
 
 **Bug Fixes**

@@ -146,8 +146,18 @@ fn tridiagonal_eigensystem(
 }
 
 // Coefficients are ascending internally. The public representation is descending.
-fn advance(previous: &[f64], before: &[f64], x: f64, constant: f64, subtract: f64) -> Vec<f64> {
-    let mut out = vec![0.0; previous.len() + 1];
+// Reuse a scratch buffer between recurrence steps instead of allocating for
+// every degree. Keep the accumulation order to preserve roundoff behavior.
+fn advance_into(
+    previous: &[f64],
+    before: &[f64],
+    x: f64,
+    constant: f64,
+    subtract: f64,
+    out: &mut Vec<f64>,
+) {
+    out.clear();
+    out.resize(previous.len() + 1, 0.0);
     for (i, &value) in previous.iter().enumerate() {
         out[i] += constant * value;
         out[i + 1] += x * value;
@@ -155,7 +165,20 @@ fn advance(previous: &[f64], before: &[f64], x: f64, constant: f64, subtract: f6
     for (i, &value) in before.iter().enumerate() {
         out[i] -= subtract * value;
     }
-    out
+}
+
+// One Horner step for p(scale*x+shift), in descending index order so the
+// previous coefficients remain available until their contributions are used.
+// The lower index contributes first, as in advance_into.
+fn compose_step(composed: &mut Vec<f64>, coefficient: f64, scale: f64, shift: f64) {
+    let len = composed.len();
+    composed.push(0.0);
+    composed[len] = 0.0 + scale * composed[len - 1];
+    for i in (1..len).rev() {
+        composed[i] = (0.0 + scale * composed[i - 1]) + shift * composed[i];
+    }
+    composed[0] = 0.0 + shift * composed[0];
+    composed[0] += coefficient;
 }
 
 #[derive(Clone, Copy)]
@@ -179,8 +202,10 @@ fn coefficients(
     if n > 256 {
         return Err(Error::InvalidInput("polynomial degree must not exceed 256"));
     }
-    let mut prev = vec![1.0];
-    let mut before = vec![];
+    let mut prev = Vec::with_capacity(n + 1);
+    prev.push(1.0);
+    let mut before = Vec::with_capacity(n + 1);
+    let mut next = Vec::with_capacity(n + 1);
     for k in 1..=n {
         let kf = k as f64;
         let (x, c, b) = match family {
@@ -201,17 +226,23 @@ fn coefficients(
             Family::Chebyt | Family::Chebyu => (2.0, 0.0, 1.0),
             Family::Gegenbauer(a) => (2.0 * (kf - 1.0 + a) / kf, 0.0, (kf - 2.0 + 2.0 * a) / kf),
         };
-        let next = advance(&prev, &before, x, c, b);
-        before = prev;
-        prev = next;
+        advance_into(&prev, &before, x, c, b, &mut next);
+        std::mem::swap(&mut before, &mut prev);
+        std::mem::swap(&mut prev, &mut next);
     }
-    // Horner composition evaluates p(scale*x+shift) symbolically.
-    let mut composed = vec![0.0];
-    for &coefficient in prev.iter().rev() {
-        composed = advance(&composed, &[], scale, shift, 0.0);
-        composed[0] += coefficient;
-    }
-    composed.truncate(n + 1);
+    // The identity transform applies to most polynomial families. It needs
+    // neither coefficient arithmetic nor the O(n^2) Horner composition.
+    let mut composed = if scale == 1.0 && shift == 0.0 {
+        prev
+    } else {
+        let mut result = Vec::with_capacity(n + 2);
+        result.push(0.0);
+        for &coefficient in prev.iter().rev() {
+            compose_step(&mut result, coefficient, scale, shift);
+        }
+        result.truncate(n + 1);
+        result
+    };
     let divisor = if monic { composed[n] } else { 1.0 / factor };
     for c in &mut composed {
         *c /= divisor;
@@ -1193,6 +1224,216 @@ pub fn roots_sh_jacobi(n: usize, p: f64, q: f64) -> Result<(Vec<f64>, Vec<f64>)>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Retain the allocation-per-step implementation as a numerical reference.
+    // This checks the exact rounding and signed zeros of coefficient generation,
+    // including the transformed and monic families.
+    fn original_advance(
+        previous: &[f64],
+        before: &[f64],
+        x: f64,
+        constant: f64,
+        subtract: f64,
+    ) -> Vec<f64> {
+        let mut out = vec![0.0; previous.len() + 1];
+        for (i, &value) in previous.iter().enumerate() {
+            out[i] += constant * value;
+            out[i + 1] += x * value;
+        }
+        for (i, &value) in before.iter().enumerate() {
+            out[i] -= subtract * value;
+        }
+        out
+    }
+
+    fn original_coefficients(
+        n: usize,
+        family: Family,
+        monic: bool,
+        scale: f64,
+        shift: f64,
+        factor: f64,
+    ) -> Result<Vec<f64>> {
+        let mut prev = vec![1.0];
+        let mut before = vec![];
+        for k in 1..=n {
+            let kf = k as f64;
+            let (x, c, b) = match family {
+                Family::Jacobi(a, b) if k == 1 => ((a + b + 2.0) / 2.0, (a - b) / 2.0, 0.0),
+                Family::Jacobi(a, b) => {
+                    let t = 2.0 * kf + a + b;
+                    let denominator = 2.0 * kf * (kf + a + b) * (t - 2.0);
+                    (
+                        (t - 1.0) * t * (t - 2.0) / denominator,
+                        (t - 1.0) * (a * a - b * b) / denominator,
+                        2.0 * (kf + a - 1.0) * (kf + b - 1.0) * t / denominator,
+                    )
+                }
+                Family::Laguerre(a) => (-1.0 / kf, (2.0 * kf - 1.0 + a) / kf, (kf - 1.0 + a) / kf),
+                Family::Hermite(true) => (1.0, 0.0, kf - 1.0),
+                Family::Hermite(false) => (2.0, 0.0, 2.0 * (kf - 1.0)),
+                Family::Chebyt if k == 1 => (1.0, 0.0, 0.0),
+                Family::Chebyt | Family::Chebyu => (2.0, 0.0, 1.0),
+                Family::Gegenbauer(a) => {
+                    (2.0 * (kf - 1.0 + a) / kf, 0.0, (kf - 2.0 + 2.0 * a) / kf)
+                }
+            };
+            let next = original_advance(&prev, &before, x, c, b);
+            before = prev;
+            prev = next;
+        }
+        let mut composed = vec![0.0];
+        for &coefficient in prev.iter().rev() {
+            composed = original_advance(&composed, &[], scale, shift, 0.0);
+            composed[0] += coefficient;
+        }
+        composed.truncate(n + 1);
+        let divisor = if monic { composed[n] } else { 1.0 / factor };
+        for c in &mut composed {
+            *c /= divisor;
+        }
+        if composed.iter().any(|x| !x.is_finite()) {
+            return Err(Error::NonFiniteEvaluation);
+        }
+        composed.reverse();
+        Ok(composed)
+    }
+
+    #[test]
+    fn reused_coefficient_buffers_match_original_bits() {
+        let families = [
+            (Family::Jacobi(0.0, 0.0), 1.0, 0.0, 1.0),
+            (Family::Jacobi(0.5, -0.5), 1.0, 0.0, 1.0),
+            (Family::Jacobi(-0.99, 2.0), 2.0, -1.0, 1.0),
+            (Family::Laguerre(0.0), 1.0, 0.0, 1.0),
+            (Family::Laguerre(2.25), 1.0, 0.0, 1.0),
+            (Family::Hermite(true), 1.0, 0.0, 1.0),
+            (Family::Hermite(false), 1.0, 0.0, 1.0),
+            (Family::Chebyt, 1.0, 0.0, 1.0),
+            (Family::Chebyu, 1.0, 0.0, 1.0),
+            (Family::Chebyt, 0.5, 0.0, 2.0),
+            (Family::Chebyu, 0.5, 0.0, 1.0),
+            (Family::Chebyt, 2.0, -1.0, 1.0),
+            (Family::Chebyu, 2.0, -1.0, 1.0),
+            (Family::Gegenbauer(0.25), 1.0, 0.0, 1.0),
+        ];
+        for (family, scale, shift, factor) in families {
+            for n in [0, 1, 2, 3, 8, 16, 32, 64, 128, 256] {
+                for monic in [false, true] {
+                    let actual = coefficients(n, family, monic, scale, shift, factor);
+                    let reference = original_coefficients(n, family, monic, scale, shift, factor);
+                    match (actual, reference) {
+                        (Ok(actual), Ok(reference)) => {
+                            assert_eq!(actual.len(), reference.len());
+                            for (i, (&a, &b)) in actual.iter().zip(&reference).enumerate() {
+                                assert_eq!(a.to_bits(), b.to_bits(), "n={n}, i={i}");
+                            }
+                        }
+                        (Err(a), Err(b)) => {
+                            assert_eq!(std::mem::discriminant(&a), std::mem::discriminant(&b));
+                        }
+                        (actual, reference) => {
+                            panic!(
+                                "n={n}, monic={monic}: actual={actual:?}, reference={reference:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reused_horner_step_preserves_signed_zero_and_special_values() {
+        let inputs = [
+            vec![0.0, -0.0, 1.0, -1.0],
+            vec![
+                f64::MIN_POSITIVE,
+                f64::MIN_POSITIVE / 2.0,
+                -f64::MIN_POSITIVE,
+            ],
+            vec![f64::MAX, -f64::MAX, f64::INFINITY],
+            vec![f64::NAN, f64::NEG_INFINITY, 0.0],
+        ];
+        for input in inputs {
+            for (scale, shift, coefficient) in [
+                (1.0, -0.0, -0.0),
+                (0.5, 0.0, -1.0),
+                (2.0, -1.0, 0.0),
+                (-1.0, 1.0, f64::INFINITY),
+            ] {
+                let mut actual = input.clone();
+                compose_step(&mut actual, coefficient, scale, shift);
+                let mut reference = original_advance(&input, &[], scale, shift, 0.0);
+                reference[0] += coefficient;
+                for (&a, &b) in actual.iter().zip(&reference) {
+                    if b.is_nan() {
+                        assert!(a.is_nan());
+                    } else {
+                        assert_eq!(a.to_bits(), b.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_rules_integrate_independent_polynomial_moments() {
+        // Exact moments through degree 2n-1 independently exercise sorted
+        // eigenvalues, the first eigenvector components, and weight scaling.
+        for n in [1, 2, 3, 5, 8, 16] {
+            let (nodes, weights) = roots_legendre(n).unwrap();
+            assert!(nodes.windows(2).all(|x| x[0] < x[1]));
+            assert!(weights.iter().all(|&w| w > 0.0));
+            for k in 0..(2 * n) {
+                let moment: f64 = nodes
+                    .iter()
+                    .zip(&weights)
+                    .map(|(&x, &w)| w * x.powi(k as i32))
+                    .sum();
+                let expected = if k % 2 == 0 {
+                    2.0 / (k + 1) as f64
+                } else {
+                    0.0
+                };
+                assert!((moment - expected).abs() < 2e-12, "Legendre n={n}, k={k}");
+            }
+        }
+        for n in [1, 2, 3, 6] {
+            let (nodes, weights) = roots_jacobi(n, 1.0, 0.0).unwrap();
+            for k in 0..(2 * n) {
+                let moment: f64 = nodes
+                    .iter()
+                    .zip(&weights)
+                    .map(|(&x, &w)| w * x.powi(k as i32))
+                    .sum();
+                let expected = if k % 2 == 0 {
+                    2.0 / (k + 1) as f64
+                } else {
+                    -2.0 / (k + 2) as f64
+                };
+                assert!((moment - expected).abs() < 2e-12, "Jacobi n={n}, k={k}");
+            }
+        }
+        for n in [1, 2, 3, 5, 8] {
+            let (nodes, weights) = roots_laguerre(n).unwrap();
+            let mut factorial = 1.0;
+            for k in 0..(2 * n) {
+                if k > 0 {
+                    factorial *= k as f64;
+                }
+                let moment: f64 = nodes
+                    .iter()
+                    .zip(&weights)
+                    .map(|(&x, &w)| w * x.powi(k as i32))
+                    .sum();
+                assert!(
+                    ((moment - factorial) / factorial).abs() < 3e-12,
+                    "Laguerre n={n}, k={k}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn quadrature_first_components_match_full_eigensystem() {

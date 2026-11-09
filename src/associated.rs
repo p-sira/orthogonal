@@ -263,6 +263,143 @@ fn associated_degrees(
     }
 }
 
+// Fill both signs of a moderate order with a shared unnormalized recurrence.
+#[inline]
+fn direct_table_order(
+    table: &mut [Vec<f64>],
+    n: usize,
+    m: usize,
+    order: usize,
+    x: f64,
+    sine: f64,
+    spherical: bool,
+) {
+    let mut ratio = 1.0;
+    for k in 1..=2 * order {
+        ratio /= k as f64;
+    }
+    let mut previous = 0.0;
+    let mut current = direct_diagonal(order as u32, sine);
+    let parity = if order.is_multiple_of(2) { 1.0 } else { -1.0 };
+    let negative_column = 2 * m + 1 - order;
+    for (degree, row) in table.iter_mut().enumerate().skip(order) {
+        let positive = if spherical {
+            current * ((2 * degree + 1) as f64 / (4.0 * PI) * ratio).sqrt()
+        } else {
+            current
+        };
+        row[order] = positive;
+        row[negative_column] = if spherical {
+            parity * positive
+        } else {
+            parity * current * ratio
+        };
+        if degree < n {
+            let next_degree = degree + 1;
+            let next = ((2 * next_degree - 1) as f64 * x * current
+                - (next_degree + order - 1) as f64 * previous)
+                / (next_degree - order) as f64;
+            previous = current;
+            current = next;
+            ratio *= (next_degree - order) as f64 / (next_degree + order) as f64;
+        }
+    }
+}
+
+// High orders need the normalized recurrence: direct factorial products can
+// underflow before the eventual polynomial value becomes representable. Keep
+// the shared recurrence in logarithmic scale and restore both signs of each
+// order at once. For unnormalized values, update (l+m)!/(l-m)! as l advances
+// instead of rebuilding its 2m factors for every table entry.
+fn scaled_table_order(
+    table: &mut [Vec<f64>],
+    n: usize,
+    m: usize,
+    order: usize,
+    x: f64,
+    sine: f64,
+    spherical: bool,
+) {
+    let mut diagonal = 1.0;
+    for k in 1..=order {
+        diagonal *= 1.0 + 0.5 / k as f64;
+    }
+    let half_log_four_pi = 0.5 * (4.0 * PI).ln();
+    let mut logarithm = -half_log_four_pi + order as f64 * sine.abs().ln() + 0.5 * diagonal.ln();
+    let mut previous = 0.0;
+    let mut current = if order.is_multiple_of(2) { 1.0 } else { -1.0 };
+    let negative_column = 2 * m + 1 - order;
+    let parity = if order.is_multiple_of(2) { 1.0 } else { -1.0 };
+
+    // The factorial ratio is only needed for the unnormalized table. Keep a
+    // bounded mantissa and a logarithmic scale even when (2m)! overflows.
+    let mut factorial = 1.0;
+    let mut factorial_log_scale = 0.0;
+    if !spherical {
+        for k in 1..=2 * order {
+            if factorial > 1e280 {
+                factorial_log_scale += factorial.ln();
+                factorial = 1.0;
+            }
+            factorial *= k as f64;
+        }
+    }
+    let rescale = |current: f64, logarithm: f64| {
+        let magnitude = if (-700.0..=700.0).contains(&logarithm) {
+            current.abs() * logarithm.exp()
+        } else {
+            (current.abs().ln() + logarithm).exp()
+        };
+        magnitude.copysign(current)
+    };
+
+    for (degree, row) in table.iter_mut().enumerate().take(n + 1).skip(order) {
+        if degree > order {
+            let l = degree as f64;
+            let q = order as f64;
+            let denominator = (l - q) * (l + q);
+            let a = ((4.0 * l * l - 1.0) / denominator).sqrt();
+            let b = (((2.0 * l + 1.0) * ((l - 1.0 - q) * (l - 1.0 + q)))
+                / ((2.0 * l - 3.0) * denominator))
+                .sqrt();
+            let next = a * x * current - b * previous;
+            previous = current;
+            current = next;
+            let magnitude = current.abs().max(previous.abs());
+            if magnitude > 1e150 {
+                current *= 1e-150;
+                previous *= 1e-150;
+                logarithm += 150.0 * core::f64::consts::LN_10;
+            } else if magnitude != 0.0 && magnitude < 1e-150 {
+                current *= 1e150;
+                previous *= 1e150;
+                logarithm -= 150.0 * core::f64::consts::LN_10;
+            }
+            if !spherical {
+                if factorial > 1e280 {
+                    factorial_log_scale += factorial.ln();
+                    factorial = 1.0;
+                }
+                factorial *= (degree + order) as f64 / (degree - order) as f64;
+            }
+        }
+        // The degree/order parity zeros are exact even after rescaling.
+        if x == 0.0 && (degree - order) % 2 == 1 {
+            row[order] = 0.0;
+            row[negative_column] = 0.0;
+        } else if spherical {
+            let positive = rescale(current, logarithm);
+            row[order] = positive;
+            row[negative_column] = parity * positive;
+        } else {
+            let half_factorial_log = 0.5 * (factorial_log_scale + factorial.ln());
+            let centered = logarithm + half_log_four_pi - 0.5 * ((2 * degree + 1) as f64).ln();
+            row[order] = rescale(current, centered + half_factorial_log);
+            row[negative_column] = parity * rescale(current, centered - half_factorial_log);
+        }
+    }
+}
+
 /// Table `[degree][order]` of P_k^j for k in 0..=n and orders 0..=m followed
 /// by -m..=-1, computing each order with one degree recurrence.
 pub(crate) fn associated_table(
@@ -277,40 +414,15 @@ pub(crate) fn associated_table(
     // moderate degrees, fill both columns together and update the factorial
     // ratio (l-m)!/(l+m)! as the degree increases, instead of recomputing
     // that product and the recurrence for every negative-order column.
-    if n <= 200 && m <= 40 && sine >= 1e-6 {
+    if (n <= 200 && m <= 40 && sine >= 1e-6) || (n <= 128 && m <= 128) {
         associated_degrees(n as u32, 0, x, sine, spherical, 0, |degree, value| {
             table[degree as usize][0] = value;
         });
         for order in 1..=m.min(n) {
-            let mut ratio = 1.0;
-            for k in 1..=2 * order {
-                ratio /= k as f64;
-            }
-            let mut previous = 0.0;
-            let mut current = direct_diagonal(order as u32, sine);
-            let parity = if order % 2 == 0 { 1.0 } else { -1.0 };
-            let negative_column = 2 * m + 1 - order;
-            for (degree, row) in table.iter_mut().enumerate().skip(order) {
-                let positive = if spherical {
-                    current * ((2 * degree + 1) as f64 / (4.0 * PI) * ratio).sqrt()
-                } else {
-                    current
-                };
-                row[order] = positive;
-                row[negative_column] = if spherical {
-                    parity * positive
-                } else {
-                    parity * current * ratio
-                };
-                if degree < n {
-                    let next_degree = degree + 1;
-                    let next = ((2 * next_degree - 1) as f64 * x * current
-                        - (next_degree + order - 1) as f64 * previous)
-                        / (next_degree - order) as f64;
-                    previous = current;
-                    current = next;
-                    ratio *= (next_degree - order) as f64 / (next_degree + order) as f64;
-                }
+            if order <= 40 && n <= 200 && sine >= 1e-6 {
+                direct_table_order(&mut table, n, m, order, x, sine, spherical);
+            } else if sine != 0.0 {
+                scaled_table_order(&mut table, n, m, order, x, sine, spherical);
             }
         }
         return table;
@@ -430,10 +542,16 @@ pub(crate) fn sph_harm_table(
         return vec![vec![nan; 2 * m + 1]; n + 1];
     }
     let amplitudes = sph_legendre_table(n, m, theta);
-    let phases: Vec<_> = (0..=m as i32)
-        .chain(-(m as i32)..0)
-        .map(|order| harmonic_phase(order, phi))
-        .collect();
+    // For each nonzero order, exp(-imφ) is the conjugate of exp(imφ).
+    // This halves the trigonometric work and preserves signed zeros of sin.
+    let mut phases = Vec::with_capacity(2 * m + 1);
+    for order in 0..=m {
+        phases.push(harmonic_phase(order as i32, phi));
+    }
+    for order in (1..=m).rev() {
+        let (sine, cosine) = phases[order];
+        phases.push((-sine, cosine));
+    }
     amplitudes
         .into_iter()
         .map(|row| {
@@ -449,4 +567,101 @@ pub(crate) fn sph_harm_table(
                 .collect()
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(actual: f64, expected: f64) {
+        assert!(actual.is_finite() && expected.is_finite());
+        let scale = actual.abs().max(expected.abs());
+        assert!(
+            (actual - expected).abs() <= 5e-11 * scale + 1e-320,
+            "actual={actual:e}, expected={expected:e}"
+        );
+    }
+
+    #[test]
+    fn all_order_tables_match_independent_scalar_paths() {
+        for n in [41_usize, 64, 128] {
+            let m = n;
+            let degrees = [0, 1, n / 2, n - 1, n];
+            let orders = [0, 1, 2, 39, 40, 41, m / 2, m - 1, m];
+            for x in [
+                -1.0,
+                -0.999_999_999_9,
+                -0.4,
+                -0.0,
+                0.0,
+                0.4,
+                0.999_999_999_9,
+                1.0,
+            ] {
+                let table = assoc_legendre_table(n, m, x);
+                for degree in degrees {
+                    for order in orders {
+                        if order > m {
+                            continue;
+                        }
+                        close(
+                            table[degree][order],
+                            assoc_legendre_p(degree as i32, order as i32, x).unwrap(),
+                        );
+                        if order > 0 {
+                            close(
+                                table[degree][2 * m + 1 - order],
+                                assoc_legendre_p(degree as i32, -(order as i32), x).unwrap(),
+                            );
+                        }
+                    }
+                }
+            }
+            for theta in [0.0, 1e-8, 0.7, PI / 2.0, PI - 1e-8, PI] {
+                let table = sph_legendre_table(n, m, theta);
+                for degree in degrees {
+                    for order in orders {
+                        if order > m {
+                            continue;
+                        }
+                        close(
+                            table[degree][order],
+                            sph_legendre_p(degree as i32, order as i32, theta).unwrap(),
+                        );
+                        if order > 0 {
+                            close(
+                                table[degree][2 * m + 1 - order],
+                                sph_legendre_p(degree as i32, -(order as i32), theta).unwrap(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn all_order_tables_preserve_exact_zeros_and_phase() {
+        let table = assoc_legendre_table(128, 128, -0.0);
+        assert_eq!(table[42][41].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(table[42][216].to_bits(), 0.0_f64.to_bits());
+        for theta in [0.0, 0.7, PI] {
+            for phi in [-0.0, 0.0, -0.8, 1e308] {
+                let all = sph_harm_table(48, 48, theta, phi);
+                for degree in [0, 1, 40, 41, 48] {
+                    for order in [-48, -41, -1, 0, 1, 41, 48] {
+                        let expected = sph_harm_y(degree, order, theta, phi).unwrap();
+                        let column = if order >= 0 {
+                            order as usize
+                        } else {
+                            (97 + order) as usize
+                        };
+                        let actual = all[degree as usize][column];
+                        close(actual.re, expected.re);
+                        close(actual.im, expected.im);
+                    }
+                }
+            }
+        }
+    }
 }

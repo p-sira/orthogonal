@@ -253,6 +253,23 @@ fn legendre(n: i32, x: f64) -> f64 {
 /// use the O(n) three-term recurrence to avoid quadratic work.
 #[inline]
 pub(crate) fn legendre_all(n: usize, x: f64) -> Vec<f64> {
+    if x == 0.0 {
+        // P_(2k+1)(0) = 0 and P_(2k)(0) = -(2k-1)/(2k) P_(2k-2)(0).
+        // Avoid the quadratic repeated near-zero series; preserve the sign
+        // of -0 for P_1, whose scalar evaluator returns x directly.
+        let mut table = vec![0.0; n + 1];
+        table[0] = 1.0;
+        if n > 0 {
+            table[1] = x;
+        }
+        let mut even = 1.0;
+        for degree in (2..=n).step_by(2) {
+            let k = degree as f64;
+            even *= -(k - 1.0) / k;
+            table[degree] = even;
+        }
+        return table;
+    }
     let per_degree = |k: usize| {
         if x.is_nan() {
             f64::NAN
@@ -540,4 +557,37 @@ polynomial! {
 polynomial! {
     /// Jacobi polynomial P_n^(alpha,beta)(x), for n >= 0 and finite alpha,beta > -1.
     eval_jacobi(n, alpha, beta, x) { jacobi(n, alpha, beta, x) }
+}
+
+#[cfg(test)]
+mod zero_legendre_table_tests {
+    use super::{legendre, legendre_all};
+
+    #[test]
+    fn exact_zero_table_preserves_scalar_values_and_signed_zeros() {
+        for &x in &[0.0_f64, -0.0] {
+            let table = legendre_all(1024, x);
+            assert_eq!(table.len(), 1025);
+            for (n, &value) in table.iter().enumerate() {
+                let scalar = legendre(n as i32, x);
+                if n == 1 || (n % 2 != 0) {
+                    assert_eq!(value.to_bits(), scalar.to_bits(), "n={n}, x={x:?}");
+                } else {
+                    assert!(
+                        (value - scalar).abs() <= 3e-13 * scalar.abs().max(1.0),
+                        "n={n}, x={x:?}, scalar={scalar}, table={value}"
+                    );
+                }
+            }
+            for &(n, expected) in &[
+                (0, 1.0_f64),
+                (2, -0.5),
+                (4, 0.375),
+                (6, -0.3125),
+                (8, 0.2734375),
+            ] {
+                assert_eq!(table[n].to_bits(), expected.to_bits());
+            }
+        }
+    }
 }
