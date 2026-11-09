@@ -6,9 +6,12 @@
 **Performance Improvements**
 - Reuse recurrence buffers during polynomial coefficient construction; avoid redundant polynomial transforms for identity mappings ([#6](https://github.com/p-sira/orthogonal/pull/6)). 
 - Build associated-Legendre and spherical-harmonic tables by shared per-order recurrences, and evaluate Legendre tables at zero by an exact O(n) even-degree recurrence ([#6](https://github.com/p-sira/orthogonal/pull/6)). 
+- Generate all six Chebyshev Gaussian quadrature rules with linear-time closed-form nodes and weights, including cancellation-free shifted endpoints. Use one linear-time Legendre recurrence for tiny nonzero arguments, a constant-time asymptotic coefficient for large-degree scalar values near zero, and logarithmic-time Chebyshev doubling for exterior arguments.
+- Avoid redundant normalization passes in generalized Laguerre recurrence; reuse Legendre evaluation for Jacobi parameters alpha=beta=0 where stable.
 
 **Testing**
 - Add larger-degree CodSpeed workloads and independent parity checks ([#6](https://github.com/p-sira/orthogonal/pull/6)).
+- Verify quadrature against the former eigensolver and analytic moments, including high-order shifted endpoints; check tiny-argument Legendre values against 100-digit fixtures, high-degree binomial coefficients, exterior Chebyshev and Laguerre identities.
 
 ### 0.2.1
 **Performance Improvements**

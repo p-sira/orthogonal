@@ -311,6 +311,63 @@ fn quadrature(
     ))
 }
 
+// Gauss-Chebyshev rules have explicit nodes and weights. Construct the pairs
+// symmetrically: this halves the trigonometric work, preserves exact symmetry,
+// and avoids the O(n^2) tridiagonal eigensolver used by general Jacobi rules.
+// The first kind integrates (1-x²)^(-1/2); the second integrates sqrt(1-x²).
+// The caller supplies the same node transform and weight multiplier as the
+// general quadrature backend.
+fn chebyshev_quadrature(
+    n: usize,
+    second: bool,
+    scale: f64,
+    shift: f64,
+    weight_scale: f64,
+) -> Result<(Vec<f64>, Vec<f64>)> {
+    if n == 0 || n > 1024 {
+        return Err(Error::InvalidInput("quadrature order must be in 1..=1024"));
+    }
+    let denominator = (n + usize::from(second)) as f64;
+    let step = std::f64::consts::PI / denominator;
+    let weight = step * weight_scale;
+    let mut nodes = vec![0.0; n];
+    let mut weights = vec![0.0; n];
+    for i in 0..n / 2 {
+        let angle = (i as f64 + if second { 1.0 } else { 0.5 }) * step;
+        let (left, right, w) = if shift == 0.5 {
+            // For the shifted [0,1] rules, (1-cos(angle))/2 cancels near
+            // zero. The half-angle identity retains relative node accuracy.
+            let (sine, cosine) = if second {
+                (0.5 * angle).sin_cos()
+            } else {
+                ((0.5 * angle).sin(), 1.0)
+            };
+            let left = sine * sine;
+            let s = 2.0 * sine * cosine;
+            (left, 1.0 - left, weight * if second { s * s } else { 1.0 })
+        } else {
+            let (sine, cosine) = if second {
+                angle.sin_cos()
+            } else {
+                (1.0, angle.cos())
+            };
+            let offset = scale * cosine;
+            (shift - offset, shift + offset, weight * sine * sine)
+        };
+        nodes[i] = left;
+        nodes[n - 1 - i] = right;
+        weights[i] = w;
+        weights[n - 1 - i] = w;
+    }
+    if !n.is_multiple_of(2) {
+        // For odd orders the central node is exactly zero before translation.
+        // Its second-kind sine factor is exactly one.
+        nodes[n / 2] = shift;
+        weights[n / 2] = weight;
+    }
+    Ok((nodes, weights))
+}
+
 /// Returns coefficients of the Jacobi P_n^(alpha,beta) polynomial in descending powers.
 ///
 /// ## Parameters and domain
@@ -794,7 +851,7 @@ pub fn chebyt(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// - [SciPy roots_chebyt](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.roots_chebyt.html).
 pub fn roots_chebyt(n: usize) -> Result<(Vec<f64>, Vec<f64>)> {
-    quadrature(n, Family::Jacobi(-0.5, -0.5), 1.0, 0.0, 1.0)
+    chebyshev_quadrature(n, false, 1.0, 0.0, 1.0)
 }
 
 /// Returns coefficients of the Chebyshev U_n polynomial in descending powers.
@@ -851,7 +908,7 @@ pub fn chebyu(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// - [SciPy roots_chebyu](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.roots_chebyu.html).
 pub fn roots_chebyu(n: usize) -> Result<(Vec<f64>, Vec<f64>)> {
-    quadrature(n, Family::Jacobi(0.5, 0.5), 1.0, 0.0, 1.0)
+    chebyshev_quadrature(n, true, 1.0, 0.0, 1.0)
 }
 
 /// Returns coefficients of the scaled Chebyshev 2T_n(x/2) polynomial in descending powers.
@@ -908,7 +965,7 @@ pub fn chebyc(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// - [SciPy roots_chebyc](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.roots_chebyc.html).
 pub fn roots_chebyc(n: usize) -> Result<(Vec<f64>, Vec<f64>)> {
-    quadrature(n, Family::Jacobi(-0.5, -0.5), 2.0, 0.0, 2.0)
+    chebyshev_quadrature(n, false, 2.0, 0.0, 2.0)
 }
 
 /// Returns coefficients of the scaled Chebyshev U_n(x/2) polynomial in descending powers.
@@ -965,7 +1022,7 @@ pub fn chebys(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// - [SciPy roots_chebys](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.roots_chebys.html).
 pub fn roots_chebys(n: usize) -> Result<(Vec<f64>, Vec<f64>)> {
-    quadrature(n, Family::Jacobi(0.5, 0.5), 2.0, 0.0, 2.0)
+    chebyshev_quadrature(n, true, 2.0, 0.0, 2.0)
 }
 
 /// Returns coefficients of the shifted Chebyshev T_n(2x−1) polynomial in descending powers.
@@ -1022,7 +1079,7 @@ pub fn sh_chebyt(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// - [SciPy roots_sh_chebyt](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.roots_sh_chebyt.html).
 pub fn roots_sh_chebyt(n: usize) -> Result<(Vec<f64>, Vec<f64>)> {
-    quadrature(n, Family::Jacobi(-0.5, -0.5), 0.5, 0.5, 1.0)
+    chebyshev_quadrature(n, false, 0.5, 0.5, 1.0)
 }
 
 /// Returns coefficients of the shifted Chebyshev U_n(2x−1) polynomial in descending powers.
@@ -1079,7 +1136,7 @@ pub fn sh_chebyu(n: usize, monic: bool) -> Result<Vec<f64>> {
 ///
 /// - [SciPy roots_sh_chebyu](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.roots_sh_chebyu.html).
 pub fn roots_sh_chebyu(n: usize) -> Result<(Vec<f64>, Vec<f64>)> {
-    quadrature(n, Family::Jacobi(0.5, 0.5), 0.5, 0.5, 0.25)
+    chebyshev_quadrature(n, true, 0.5, 0.5, 0.25)
 }
 
 /// Returns coefficients of the shifted Legendre P_n(2x−1) polynomial in descending powers.
@@ -1430,6 +1487,141 @@ mod tests {
                 assert!(
                     ((moment - factorial) / factorial).abs() < 3e-12,
                     "Laguerre n={n}, k={k}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn chebyshev_closed_form_rules_match_generic_jacobi_eigensolver() {
+        // The previous public implementations all used Golub-Welsch with
+        // Jacobi parameters (+/-1/2, +/-1/2). Keep that independent numerical
+        // backend as a reference for every scaling/translation variant.
+        for n in [1, 2, 3, 4, 8, 32, 128, 256] {
+            for second in [false, true] {
+                let alpha = if second { 0.5 } else { -0.5 };
+                let (reference_nodes, reference_weights) =
+                    quadrature(n, Family::Jacobi(alpha, alpha), 1.0, 0.0, 1.0).unwrap();
+                for variant in 0..3 {
+                    let (scale, shift, weight_scale, rule) = match (second, variant) {
+                        (false, 0) => (1.0, 0.0, 1.0, roots_chebyt(n)),
+                        (false, 1) => (2.0, 0.0, 2.0, roots_chebyc(n)),
+                        (false, _) => (0.5, 0.5, 1.0, roots_sh_chebyt(n)),
+                        (true, 0) => (1.0, 0.0, 1.0, roots_chebyu(n)),
+                        (true, 1) => (2.0, 0.0, 2.0, roots_chebys(n)),
+                        (true, _) => (0.5, 0.5, 0.25, roots_sh_chebyu(n)),
+                    };
+                    let (nodes, weights) = rule.unwrap();
+                    assert!(nodes.windows(2).all(|pair| pair[0] < pair[1]));
+                    for i in 0..n {
+                        let expected_node = scale * reference_nodes[i] + shift;
+                        let expected_weight = weight_scale * reference_weights[i];
+                        assert!(
+                            (nodes[i] - expected_node).abs() <= 3e-12 * (1.0 + expected_node.abs()),
+                            "node n={n}, second={second}, variant={variant}, i={i}: {} vs {}",
+                            nodes[i],
+                            expected_node
+                        );
+                        assert!(
+                            (weights[i] - expected_weight).abs()
+                                <= 3e-12 * (1.0 + expected_weight.abs()),
+                            "weight n={n}, second={second}, variant={variant}, i={i}: {} vs {}",
+                            weights[i],
+                            expected_weight
+                        );
+                        assert_eq!(weights[i], weights[n - 1 - i]);
+                    }
+                    if n % 2 != 0 {
+                        assert_eq!(nodes[n / 2], shift);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn chebyshev_closed_form_rules_integrate_exact_moments_to_high_order() {
+        // Independent beta-integral moments: E_T[x^(2k)] = pi * (2k-1)!!/(2k)!!
+        // and E_U[x^(2k)] = (pi/2) * product_{j=1}^k (2j-1)/(2j+2).
+        // Undo the affine node map so one identity covers all six public rules.
+        for n in [1, 2, 3, 5, 16, 128, 512, 1024] {
+            for (second, scale, shift, weight_scale, rule) in [
+                (false, 1.0, 0.0, 1.0, roots_chebyt(n)),
+                (true, 1.0, 0.0, 1.0, roots_chebyu(n)),
+                (false, 2.0, 0.0, 2.0, roots_chebyc(n)),
+                (true, 2.0, 0.0, 2.0, roots_chebys(n)),
+                (false, 0.5, 0.5, 1.0, roots_sh_chebyt(n)),
+                (true, 0.5, 0.5, 0.25, roots_sh_chebyu(n)),
+            ] {
+                let (nodes, weights) = rule.unwrap();
+                assert_eq!(nodes.len(), n);
+                assert!(nodes.windows(2).all(|pair| pair[0] < pair[1]));
+                assert!(weights.iter().all(|&w| w > 0.0 && w.is_finite()));
+                let mut even_moment =
+                    std::f64::consts::PI * if second { 0.5 } else { 1.0 } * weight_scale;
+                for degree in 0..=(2 * n - 1).min(24) {
+                    if degree > 0 && degree % 2 == 0 {
+                        let k = degree / 2;
+                        even_moment *=
+                            (2 * k - 1) as f64 / (2 * k + if second { 2 } else { 0 }) as f64;
+                    }
+                    let expected = if degree % 2 == 0 { even_moment } else { 0.0 };
+                    let actual: f64 = nodes
+                        .iter()
+                        .zip(&weights)
+                        .map(|(&node, &weight)| {
+                            weight * ((node - shift) / scale).powi(degree as i32)
+                        })
+                        .sum();
+                    assert!(
+                        (actual - expected).abs() < 7e-12 * (1.0 + expected.abs()),
+                        "moment n={n}, second={second}, scale={scale}, degree={degree}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+        for n in [0, 1025] {
+            assert!(roots_chebyt(n).is_err());
+            assert!(roots_chebyu(n).is_err());
+            assert!(roots_chebyc(n).is_err());
+            assert!(roots_chebys(n).is_err());
+            assert!(roots_sh_chebyt(n).is_err());
+            assert!(roots_sh_chebyu(n).is_err());
+        }
+    }
+
+    #[test]
+    fn shifted_chebyshev_endpoint_nodes_keep_relative_precision() {
+        // Independent Taylor expansions avoid the subtraction in
+        // (1-cos(theta))/2 and expose cancellation near the left endpoint.
+        let n = 1024;
+        for second in [false, true] {
+            let (nodes, weights) = if second {
+                roots_sh_chebyu(n).unwrap()
+            } else {
+                roots_sh_chebyt(n).unwrap()
+            };
+            let denominator = (n + usize::from(second)) as f64;
+            let theta = std::f64::consts::PI * if second { 1.0 } else { 0.5 } / denominator;
+            let z = theta * theta;
+            let expected_left = 0.25 * z * (1.0 - z / 12.0 + z * z / 360.0);
+            assert!(
+                ((nodes[0] - expected_left) / expected_left).abs() < 5e-14,
+                "leftmost node n={n}, second={second}: {} vs {}",
+                nodes[0],
+                expected_left
+            );
+            assert_eq!(nodes[n - 1], 1.0 - nodes[0]);
+            if second {
+                let expected_weight = std::f64::consts::PI / denominator
+                    * 0.25
+                    * z
+                    * (1.0 - z / 3.0 + 2.0 * z * z / 45.0);
+                assert!(
+                    ((weights[0] - expected_weight) / expected_weight).abs() < 5e-14,
+                    "leftmost weight n={n}: {} vs {}",
+                    weights[0],
+                    expected_weight
                 );
             }
         }
