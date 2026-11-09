@@ -113,7 +113,9 @@ fn chebyshev(n: i32, x: f64, second: bool) -> f64 {
         if x >= 1e150 {
             return sign * parity * f64::INFINITY;
         }
-        let target = if second { n + 1 } else { n } as u32;
+        // Convert before adding one: U_n uses T_(n+1), and n=i32::MAX
+        // must not overflow the signed degree when doubling in O(log n).
+        let target = n as u32 + u32::from(second);
         let mut t = 1.0;
         let mut u = 0.0;
         let mut bit = 1 << (31 - target.leading_zeros());
@@ -692,6 +694,10 @@ mod optimized_evaluation_tests {
         }
         assert_eq!(chebyshev(64, 1e200, false), f64::INFINITY);
         assert_eq!(chebyshev(65, -1e200, true), f64::NEG_INFINITY);
+        // The U_n doubling path evaluates T_(n+1): its exponent needs u32
+        // so n=i32::MAX stays valid in debug builds.
+        assert_eq!(chebyshev(i32::MAX, 1.1, true), f64::INFINITY);
+        assert_eq!(chebyshev(i32::MAX, -1.1, true), f64::NEG_INFINITY);
     }
 
     #[test]
