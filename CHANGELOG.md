@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- Improve high-degree Chebyshev accuracy near both endpoints, inside and outside [-1, 1].
 - Prevent integer overflow when evaluating Chebyshev polynomials of the second kind at the maximum supported degree ([#6](https://github.com/p-sira/orthogonal/pull/6)).
 
 ## 0.2.1

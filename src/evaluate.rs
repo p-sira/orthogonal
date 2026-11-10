@@ -103,13 +103,39 @@ fn chebyshev(n: i32, x: f64, second: bool) -> f64 {
     }
     let parity = if x < 0.0 && n % 2 != 0 { -1.0 } else { 1.0 };
     let x = x.abs();
-    if n >= 64 && (x < 1.0 || x >= 1.1) {
+    if n >= 64 && (0.99..1.1).contains(&x) {
+        // Near x=1, doubling amplifies rounding in 2*T_k²-1, while the
+        // linear recurrence accumulates error over many nearly equal terms.
+        // acos/acosh retain the small distance from the endpoint. The
+        // identities T_n=cos(nθ), U_n=sin((n+1)θ)/sin(θ) (and their
+        // hyperbolic counterparts) avoid both sources of error.
+        let degree = n as f64 + if second { 1.0 } else { 0.0 };
+        let value = if x < 1.0 {
+            let theta = x.acos();
+            if second {
+                (degree * theta).sin() / theta.sin()
+            } else {
+                (degree * theta).cos()
+            }
+        } else {
+            let theta = x.acosh();
+            if second {
+                // sinh(theta) < 1 in this interval, so numerator overflow
+                // implies that the final value also overflows.
+                (degree * theta).sinh() / theta.sinh()
+            } else {
+                (degree * theta).cosh()
+            }
+        };
+        return sign * parity * value;
+    }
+    if n >= 64 {
         // Binary doubling computes (T_k(x), U_{k-1}(x)) in O(log n).
         // Keeping both polynomials avoids division by 1-x² near endpoints.
         // For exterior x >= 1.1, all terms grow with the same sign, so
         // doubling is stable and avoids a potentially million-step recurrence.
-        // Very close to x=1 from above, the linear recurrence avoids the
-        // cancellation in 2*T_k²-1. Small degrees retain its low overhead.
+        // Endpoint arguments use the identities above. Small degrees retain
+        // the low overhead of the linear recurrence below.
         if x >= 1e150 {
             return sign * parity * f64::INFINITY;
         }
