@@ -1,38 +1,46 @@
 # Changelog
 
-## 0.2
+## 0.2.2
 
-### 0.2.1
+### Performance
 
-**Performance Improvements**
-- `eval_sh_jacobi`, `try_eval_sh_jacobi`: Evaluate monic shifted-Jacobi polynomials directly by a three-term recurrence, removing three log-gamma evaluations and intermediate normalization per call. Use direct, low-division coefficients for ordinary parameters and overflow-safe factored ratios for extreme parameters, improving short and long recurrences.
+- Reduce allocations and redundant transforms when constructing polynomial coefficients ([#6](https://github.com/p-sira/orthogonal/pull/6)).
+- Accelerate associated-Legendre and spherical-harmonic tables, and Legendre tables at zero ([#6](https://github.com/p-sira/orthogonal/pull/6)).
+- Generate all six Chebyshev Gaussian quadrature rules in linear time, with more accurate shifted endpoints ([#6](https://github.com/p-sira/orthogonal/pull/6)).
+- Accelerate Legendre evaluation near zero, Chebyshev evaluation outside [-1, 1], generalized Laguerre evaluation, and Jacobi evaluation with zero parameters ([#6](https://github.com/p-sira/orthogonal/pull/6)).
 
-**Bug Fixes**
-- Preserve small, representable shifted-Jacobi endpoint values near admissible parameter boundaries with direct product formulas, avoiding recurrence cancellation.
+### Fixed
 
-**Tests**
-- Compare shifted-Jacobi values with independently generated 110-digit mpmath Jacobi/Gamma references across degrees, parameter boundaries, endpoints, and interior/exterior arguments.
+- Prevent integer overflow when evaluating Chebyshev polynomials of the second kind at the maximum supported degree ([#6](https://github.com/p-sira/orthogonal/pull/6)).
 
-### 0.2.0
+## 0.2.1
 
-**Performance**
-- `lpmv`: Avoid expensive high-order hypergeometric seeds for well-conditioned interior arguments by combining a stable degree recurrence with one associated-order recurrence; preserve direct evaluation near the positive endpoint to avoid cancellation.
-- Keep previously supported and newly supported `lpmv` inputs in separate benchmark groups; the original benchmark measured `NaN` rejection, not a valid function evaluation.
+### Performance
 
-**Bug Fixes**
-- `lqn` and `lqmn`: Restore Sci-compatible degree and order limits up to 4096 and the established matrix-size bound; support the real exterior associated-Q branch for positive orders.
-- `lpmv`: Restore the documented Sci real-degree and integer-order input domain, including noninteger degrees near the negative endpoint.
+- Accelerate `eval_sh_jacobi` and `try_eval_sh_jacobi` with a direct monic recurrence ([#5](https://github.com/p-sira/orthogonal/pull/5)).
 
-**Breaking Changes**
-- `assoc_legendre_p`, `sph_legendre_p`, and `sph_harm_y`: Accept signed `i32` degrees instead of `u32`, consistently with scalar polynomial evaluators. Negative degrees are rejected with `Error::InvalidInput` rather than requiring callers to convert a signed degree; nonnegative degrees use the same internal recurrences.
+### Fixed
 
-**Tests**
-- Verify signed degree interoperability, rejection of negative and out-of-range degrees, and existing SciPy reference results.
+- Preserve small shifted-Jacobi endpoint values near parameter boundaries ([#5](https://github.com/p-sira/orthogonal/pull/5)).
 
-## 0.1
+## 0.2.0
 
-### 0.1.0
+### Breaking changes
 
-**New Features**
-- Initial standalone extraction of classical orthogonal polynomials, associated Legendre functions, spherical harmonics, and Gaussian quadrature.
-- Include scalar evaluators, checked `try_eval_*` variants, coefficient constructors, and quadrature rules, with independent SciPy reference fixtures.
+- Change degree arguments from `u32` to `i32` in `assoc_legendre_p`, `sph_legendre_p`, and `sph_harm_y`. Negative degrees return `Error::InvalidInput`.
+
+### Performance
+
+- Accelerate `lpmv` for well-conditioned interior arguments.
+
+### Fixed
+
+- Restore Sci-compatible degree and order limits up to 4096 in `lqn` and `lqmn`, and support the real exterior associated-Q branch for positive orders.
+- Restore the documented real-degree and integer-order domain of `lpmv`, including noninteger degrees near the negative endpoint.
+
+## 0.1.0
+
+### Added
+
+- Initial standalone release of classical orthogonal polynomials, associated Legendre functions, spherical harmonics, and Gaussian quadrature.
+- Scalar evaluators, checked `try_eval_*` variants, polynomial coefficient constructors, and quadrature rules.

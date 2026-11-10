@@ -11,6 +11,16 @@ const QUAD_DEGREES: &[usize] = &[10, 100, 500];
 mod coefficients {
     use super::*;
 
+    #[divan::bench(args = [64, 128, 256])]
+    fn legendre_large(n: usize) -> Vec<f64> {
+        orthogonal::legendre(black_box(n), false).unwrap()
+    }
+
+    #[divan::bench(args = [64, 128, 256])]
+    fn jacobi_large(n: usize) -> Vec<f64> {
+        orthogonal::jacobi(black_box(n), 0.5, 0.25, false).unwrap()
+    }
+
     #[divan::bench(args = COEFF_DEGREES)]
     fn legendre(n: usize) -> Vec<f64> {
         orthogonal::legendre(black_box(n), false).unwrap()
@@ -73,5 +83,42 @@ mod quadrature {
     #[divan::bench(args = QUAD_DEGREES)]
     fn roots_chebyt(n: usize) -> (Vec<f64>, Vec<f64>) {
         orthogonal::roots_chebyt(black_box(n)).unwrap()
+    }
+
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_chebyu(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_chebyu(black_box(n)).unwrap()
+    }
+
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_chebyc(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_chebyc(black_box(n)).unwrap()
+    }
+
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_chebys(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_chebys(black_box(n)).unwrap()
+    }
+
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_sh_chebyt(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_sh_chebyt(black_box(n)).unwrap()
+    }
+
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_sh_chebyu(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_sh_chebyu(black_box(n)).unwrap()
+    }
+
+    // Matched orders through the generic Golub-Welsch backend show the cost
+    // of constructing the same rules without their explicit trigonometric form.
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_chebyt_generic_jacobi(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_jacobi(black_box(n), -0.5, -0.5).unwrap()
+    }
+
+    #[divan::bench(args = QUAD_DEGREES)]
+    fn roots_chebyu_generic_jacobi(n: usize) -> (Vec<f64>, Vec<f64>) {
+        orthogonal::roots_jacobi(black_box(n), 0.5, 0.5).unwrap()
     }
 }

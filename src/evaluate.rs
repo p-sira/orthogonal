@@ -103,11 +103,19 @@ fn chebyshev(n: i32, x: f64, second: bool) -> f64 {
     }
     let parity = if x < 0.0 && n % 2 != 0 { -1.0 } else { 1.0 };
     let x = x.abs();
-    if n >= 64 && x < 1.0 {
+    if n >= 64 && (x < 1.0 || x >= 1.1) {
         // Binary doubling computes (T_k(x), U_{k-1}(x)) in O(log n).
         // Keeping both polynomials avoids division by 1-x² near endpoints.
-        // The short recurrence below retains its low overhead for small n.
-        let target = if second { n + 1 } else { n } as u32;
+        // For exterior x >= 1.1, all terms grow with the same sign, so
+        // doubling is stable and avoids a potentially million-step recurrence.
+        // Very close to x=1 from above, the linear recurrence avoids the
+        // cancellation in 2*T_k²-1. Small degrees retain its low overhead.
+        if x >= 1e150 {
+            return sign * parity * f64::INFINITY;
+        }
+        // Convert before adding one: U_n uses T_(n+1), and n=i32::MAX
+        // must not overflow the signed degree when doubling in O(log n).
+        let target = n as u32 + u32::from(second);
         let mut t = 1.0;
         let mut u = 0.0;
         let mut bit = 1 << (31 - target.leading_zeros());
@@ -200,7 +208,26 @@ fn legendre(n: i32, x: f64) -> f64 {
         // xsf's power series avoids subtracting adjacent, nearly equal values.
         let a = n / 2;
         let mut term = if a % 2 == 0 { 1.0 } else { -1.0 };
-        term *= if n % 2 == 0 {
+        term *= if a >= 512 {
+            // The first Maclaurin coefficient contains C(2a,a)/4^a.
+            // Computing it by a half-beta product takes O(a) divisions even
+            // when the remaining tiny-x series needs only a few terms.
+            // The central-binomial asymptotic is accurate to a few ulps for
+            // a >= 512; preserve the direct product for smaller degrees.
+            let reciprocal = 1.0 / a as f64;
+            let central = (1.0
+                + reciprocal
+                    * (-0.125
+                        + reciprocal
+                            * (1.0 / 128.0
+                                + reciprocal * (5.0 / 1024.0 - reciprocal * (21.0 / 32768.0)))))
+                / (std::f64::consts::PI * a as f64).sqrt();
+            if n % 2 == 0 {
+                central
+            } else {
+                n as f64 * central * x
+            }
+        } else if n % 2 == 0 {
             -2.0 / crate::signed_half_beta(a as f64 + 1.0, -0.5)
         } else {
             2.0 * x / crate::signed_half_beta(a as f64 + 1.0, 0.5)
@@ -248,11 +275,28 @@ fn legendre(n: i32, x: f64) -> f64 {
 }
 
 /// P_0(x), ..., P_n(x) in one pass of the recurrence used by [`legendre`];
-/// entries match scalar evaluation within floating-point rounding. For tiny
-/// |x| and n <= 4096, the scalar near-zero series is retained. Larger tables
-/// use the O(n) three-term recurrence to avoid quadratic work.
+/// entries match scalar evaluation within floating-point rounding. The O(n)
+/// recurrence is stable throughout the interior interval, including tiny
+/// nonzero |x|; exactly zero uses its even-degree product identity.
 #[inline]
 pub(crate) fn legendre_all(n: usize, x: f64) -> Vec<f64> {
+    if x == 0.0 {
+        // P_(2k+1)(0) = 0 and P_(2k)(0) = -(2k-1)/(2k) P_(2k-2)(0).
+        // Avoid the quadratic repeated near-zero series; preserve the sign
+        // of -0 for P_1, whose scalar evaluator returns x directly.
+        let mut table = vec![0.0; n + 1];
+        table[0] = 1.0;
+        if n > 0 {
+            table[1] = x;
+        }
+        let mut even = 1.0;
+        for degree in (2..=n).step_by(2) {
+            let k = degree as f64;
+            even *= -(k - 1.0) / k;
+            table[degree] = even;
+        }
+        return table;
+    }
     let per_degree = |k: usize| {
         if x.is_nan() {
             f64::NAN
@@ -261,7 +305,7 @@ pub(crate) fn legendre_all(n: usize, x: f64) -> Vec<f64> {
         }
     };
     let a = x.abs();
-    if x.is_nan() || (a < 1e-5 && n <= 4096) || a == 1.0 || a.is_infinite() || n < 2 {
+    if x.is_nan() || a == 1.0 || a.is_infinite() || n < 2 {
         return (0..=n).map(per_degree).collect();
     }
     if a < 0.9 {
@@ -360,18 +404,25 @@ fn laguerre(n: i32, alpha: f64, x: f64) -> f64 {
         }
         return value;
     }
-    let scale = endpoint_binomial(n, alpha);
     if x == 0.0 {
-        return scale;
+        return endpoint_binomial(n, alpha);
+    }
+    // Build the binomial normalization alongside the difference recurrence.
+    // Both previously traversed all n degrees separately. If normalization
+    // overflows, restart with the unnormalized three-term recurrence below.
+    let mut scale = alpha + 1.0;
+    let mut difference = -x / scale;
+    let mut value = 1.0 + difference;
+    for k in 1..n {
+        let k = k as f64;
+        difference = -x / (k + alpha + 1.0) * value + k / (k + alpha + 1.0) * difference;
+        value += difference;
+        scale *= (alpha + k + 1.0) / (k + 1.0);
+        if !scale.is_finite() {
+            break;
+        }
     }
     if scale.is_finite() {
-        let mut difference = -x / (alpha + 1.0);
-        let mut value = 1.0 + difference;
-        for k in 1..n {
-            let k = k as f64;
-            difference = -x / (k + alpha + 1.0) * value + k / (k + alpha + 1.0) * difference;
-            value += difference;
-        }
         return scale * value;
     }
     // Avoid normalization overflow times a tiny value by falling back to the
@@ -424,6 +475,11 @@ fn jacobi(n: i32, alpha: f64, beta: f64, x: f64) -> f64 {
     }
     if n == 0 {
         return 1.0;
+    }
+    // P_n^(0,0) = P_n. Use the cheaper Legendre recurrence on its stable
+    // interval; retain Jacobi's own near-zero path and signed-zero behavior.
+    if alpha == 0.0 && beta == 0.0 && x.abs() >= 1e-5 {
+        return legendre(n, x);
     }
     // Reflection preserves parity and uses the positive endpoint consistently.
     if x < 0.0 {
@@ -540,4 +596,139 @@ polynomial! {
 polynomial! {
     /// Jacobi polynomial P_n^(alpha,beta)(x), for n >= 0 and finite alpha,beta > -1.
     eval_jacobi(n, alpha, beta, x) { jacobi(n, alpha, beta, x) }
+}
+
+#[cfg(test)]
+mod zero_legendre_table_tests {
+    use super::{legendre, legendre_all};
+
+    #[test]
+    fn tiny_x_high_degree_coefficient_matches_independent_binomial_product() {
+        // P_(2k)(0) = (-1)^k C(2k,k)/4^k and
+        // P_(2k+1)'(0) = (-1)^k (2k+1) C(2k,k)/4^k.
+        // Multiplying the finite binomial product provides an independent
+        // reference for the asymptotic coefficient used by large degrees.
+        for k in [512_i32, 1024, 4096, 50_000, 499_999] {
+            let central = (1..=k).fold(1.0, |value, j| {
+                value * ((2 * j - 1) as f64 / (2 * j) as f64)
+            });
+            let parity = if k % 2 == 0 { 1.0 } else { -1.0 };
+            let expected_even = parity * central;
+            let actual_even = legendre(2 * k, 0.0);
+            assert!(
+                (actual_even - expected_even).abs() <= 3e-12 * expected_even.abs(),
+                "even degree={}, actual={actual_even}, expected={expected_even}",
+                2 * k
+            );
+            // At |x|=1e-14 the omitted x^3 term is negligible even at the
+            // maximum supported degree, so the linear coefficient dominates.
+            for x in [-1e-14, 1e-14] {
+                let expected_odd = parity * (2 * k + 1) as f64 * central * x;
+                let actual_odd = legendre(2 * k + 1, x);
+                assert!(
+                    (actual_odd - expected_odd).abs() <= 3e-12 * expected_odd.abs(),
+                    "odd degree={}, x={x}, actual={actual_odd}, expected={expected_odd}",
+                    2 * k + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn exact_zero_table_preserves_scalar_values_and_signed_zeros() {
+        for &x in &[0.0_f64, -0.0] {
+            let table = legendre_all(1024, x);
+            assert_eq!(table.len(), 1025);
+            for (n, &value) in table.iter().enumerate() {
+                let scalar = legendre(n as i32, x);
+                if n == 1 || (n % 2 != 0) {
+                    assert_eq!(value.to_bits(), scalar.to_bits(), "n={n}, x={x:?}");
+                } else {
+                    assert!(
+                        (value - scalar).abs() <= 3e-13 * scalar.abs().max(1.0),
+                        "n={n}, x={x:?}, scalar={scalar}, table={value}"
+                    );
+                }
+            }
+            for &(n, expected) in &[
+                (0, 1.0_f64),
+                (2, -0.5),
+                (4, 0.375),
+                (6, -0.3125),
+                (8, 0.2734375),
+            ] {
+                assert_eq!(table[n].to_bits(), expected.to_bits());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod optimized_evaluation_tests {
+    use super::{chebyshev, jacobi, laguerre};
+
+    #[test]
+    fn chebyshev_exterior_doubling_matches_independent_three_term_recurrence() {
+        for x in [1.1_f64, 1.25, 2.0] {
+            for second in [false, true] {
+                for n in [64, 65, 256, 257, 512] {
+                    let (mut prior, mut current) = (1.0, if second { 2.0 * x } else { x });
+                    for _ in 1..n {
+                        (prior, current) = (current, 2.0 * x * current - prior);
+                    }
+                    for sign in [1.0, -1.0] {
+                        let value = chebyshev(n, sign * x, second);
+                        let expected = if sign < 0.0 && n % 2 != 0 {
+                            -current
+                        } else {
+                            current
+                        };
+                        assert!(
+                            value.is_finite() && (value - expected).abs() <= 3e-12 * expected.abs(),
+                            "n={n}, x={}, second={second}, value={value}, expected={expected}",
+                            sign * x
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(chebyshev(64, 1e200, false), f64::INFINITY);
+        assert_eq!(chebyshev(65, -1e200, true), f64::NEG_INFINITY);
+        // The U_n doubling path evaluates T_(n+1): its exponent needs u32
+        // so n=i32::MAX stays valid in debug builds.
+        assert_eq!(chebyshev(i32::MAX, 1.1, true), f64::INFINITY);
+        assert_eq!(chebyshev(i32::MAX, -1.1, true), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn generalized_laguerre_single_pass_matches_finite_binomial_series() {
+        for alpha in [0.2_f64, 1.5, 10.0] {
+            for x in [0.1_f64, 0.75, 2.0] {
+                for n in [2_i32, 3, 5, 10, 20] {
+                    let mut term =
+                        (1..=n).fold(1.0, |value, k| value * (alpha + k as f64) / k as f64);
+                    let mut expected = term;
+                    for k in 1..=n {
+                        term *= -x * (n - k + 1) as f64 / (k as f64 * (alpha + k as f64));
+                        expected += term;
+                    }
+                    let value = laguerre(n, alpha, x);
+                    assert!(
+                        (value - expected).abs() <= 2e-10 * expected.abs().max(1.0),
+                        "n={n}, alpha={alpha}, x={x}, value={value}, expected={expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn jacobi_legendre_identity_preserves_endpoints_and_zero() {
+        for x in [-1.0_f64, -0.7, -0.2, 0.2, 0.7, 1.0] {
+            let expected = (5.0 * x * x * x - 3.0 * x) * 0.5;
+            assert!((jacobi(3, 0.0, 0.0, x) - expected).abs() < 2e-15);
+        }
+        assert_eq!(jacobi(1, 0.0, 0.0, -0.0).to_bits(), 0.0_f64.to_bits());
+        assert_eq!(jacobi(1, 0.0, 0.0, 0.0).to_bits(), 0.0_f64.to_bits());
+    }
 }
