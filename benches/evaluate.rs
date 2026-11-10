@@ -107,6 +107,27 @@ fn chebyu_exterior(n: i32) -> f64 {
     orthogonal::eval_chebyu(black_box(n), black_box(1.1_f64))
 }
 
+// Exercise the accuracy-sensitive paths on both sides of the endpoint.
+#[divan::bench(args = [500, 1024, 1_000_000])]
+fn chebyt_endpoint_interior(n: i32) -> f64 {
+    orthogonal::eval_chebyt(black_box(n), black_box(0.9999999999_f64))
+}
+
+#[divan::bench(args = [500, 1024, 1_000_000])]
+fn chebyu_endpoint_interior(n: i32) -> f64 {
+    orthogonal::eval_chebyu(black_box(n), black_box(0.9999999999_f64))
+}
+
+#[divan::bench(args = [500, 1024, 1_000_000])]
+fn chebyt_endpoint_exterior(n: i32) -> f64 {
+    orthogonal::eval_chebyt(black_box(n), black_box(1.0000000000000002_f64))
+}
+
+#[divan::bench(args = [500, 1024, 1_000_000])]
+fn chebyu_endpoint_exterior(n: i32) -> f64 {
+    orthogonal::eval_chebyu(black_box(n), black_box(1.0000000000000002_f64))
+}
+
 #[divan::bench(args = [64, 256, 1000])]
 fn jacobi_legendre_specialization(n: i32) -> f64 {
     orthogonal::eval_jacobi(

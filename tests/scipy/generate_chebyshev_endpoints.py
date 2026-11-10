@@ -18,6 +18,8 @@ def main() -> None:
         math.nextafter(0.99, 0.0),
         0.99,
         0.999,
+        math.nextafter(0.9999, 0.0),
+        0.9999,
         1.0 - 1e-10,
         math.nextafter(1.0, 0.0),
         math.nextafter(1.0, math.inf),
@@ -28,9 +30,9 @@ def main() -> None:
         1.1,
     )
     with target.open("w", newline="") as output:
-        writer = csv.writer(output)
+        writer = csv.writer(output, lineterminator="\n")
         writer.writerow(("family", "n", "x", "expected"))
-        for n in (63, 64, 65, 1024, 999_999, 1_000_000):
+        for n in (63, 64, 65, 500, 1023, 1024, 999_999, 1_000_000):
             # Include a binary64 input close to a T_n root near the endpoint.
             for x in (*arguments, math.cos(math.pi / (2 * n))):
                 exact_x = mp.mpf(x)

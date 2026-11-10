@@ -41,7 +41,7 @@ fn endpoint_values_match_high_precision_references() {
         }
         count += 1;
     }
-    assert_eq!(count, 144);
+    assert_eq!(count, 224);
 }
 
 #[test]
