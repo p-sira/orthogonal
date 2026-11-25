@@ -1,11 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.3
 
 ### Performance
 
-- Avoid redundant initialization and temporary allocations in `lqn`.
-- Share direct associated Legendre diagonal evaluation and normalization between scalar and table recurrences.
+- Reduce allocation overhead in `lqn` and streamline associated Legendre evaluation ([#8](https://github.com/p-sira/orthogonal/pull/8)).
 
 ## 0.2.2
 
