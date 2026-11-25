@@ -368,66 +368,67 @@ pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
             "Legendre Q requires n<=4096, finite x != ±1",
         ));
     }
-    let mut q = vec![0.0; n + 1];
-    let mut d = vec![0.0; n + 1];
     let denominator = (1.0 - x) * (1.0 + x);
-    if x.abs() < 1.0 {
-        q[0] = x.atanh();
-        if n > 0 {
-            q[1] = x * q[0] - 1.0;
-        }
-        for k in 2..=n {
-            let kf = k as f64;
-            q[k] = ((2.0 * kf - 1.0) * x * q[k - 1] - (kf - 1.0) * q[k - 2]) / kf;
-        }
-    } else {
-        let a = x.abs();
+    let exterior = x.abs() > 1.0;
+    let a = if exterior { x.abs() } else { x };
+    let (q0, acosh) = if exterior {
         // log1p avoids reciprocal rounding near |x|=1 and avoids catastrophic
         // cancellation in atanh(1/x) as |x| tends to infinity.
-        let q0 = 0.5 * (2.0 / (a - 1.0)).ln_1p();
-        q[0] = q0;
-        let acosh = a.acosh();
-        if (n as f64) * acosh <= 1.0 {
-            // Very near the logarithmic singularity, the ordinary recurrence
-            // is well conditioned over n steps and needs no backward iteration.
-            if n > 0 {
-                q[1] = a * q0 - 1.0;
-            }
-            for k in 2..=n {
+        (0.5 * (2.0 / (a - 1.0)).ln_1p(), a.acosh())
+    } else {
+        (x.atanh(), 0.0)
+    };
+    let mut q = Vec::with_capacity(n + 1);
+    q.push(q0);
+    if !exterior || (n as f64) * acosh <= 1.0 {
+        // The forward recurrence also works sufficiently close to the
+        // exterior logarithmic singularity. Append each computed value once.
+        if n > 0 {
+            let mut previous = q0;
+            let mut current = a * q0 - 1.0;
+            q.push(current);
+            q.extend((2..=n).map(|k| {
                 let kf = k as f64;
-                q[k] = ((2.0 * kf - 1.0) * a * q[k - 1] - (kf - 1.0) * q[k - 2]) / kf;
-            }
-        } else {
-            // Pincherle's minimal-solution continued fraction:
-            // Q_k/Q_(k-1) = k / ((2k+1)*x - (k+1)*Q_(k+1)/Q_k).
-            // Truncation error decreases exponentially with acosh(x).
-            let extra = (20.0 / acosh).ceil().max(32.0) as usize;
-            let mut ratios = vec![0.0; n + 1];
-            let mut next_ratio = 0.0;
-            for k in (1..=n + extra).rev() {
-                let kf = k as f64;
-                next_ratio = (kf / a) / ((2.0 * kf + 1.0) - (kf + 1.0) * next_ratio / a);
-                if k <= n {
-                    ratios[k] = next_ratio;
-                }
-            }
-            for k in 1..=n {
-                q[k] = q[k - 1] * ratios[k];
+                let next = ((2.0 * kf - 1.0) * a * current - (kf - 1.0) * previous) / kf;
+                previous = current;
+                current = next;
+                next
+            }));
+        }
+    } else {
+        // Pincherle's minimal-solution continued fraction:
+        // Q_k/Q_(k-1) = k / ((2k+1)*x - (k+1)*Q_(k+1)/Q_k).
+        // Truncation error decreases exponentially with acosh(x).
+        let extra = (20.0 / acosh).ceil().max(32.0) as usize;
+        // Store ratios in the result buffer and replace them with Q values.
+        q.resize(n + 1, 0.0);
+        let mut next_ratio = 0.0;
+        for k in (1..=n + extra).rev() {
+            let kf = k as f64;
+            next_ratio = (kf / a) / ((2.0 * kf + 1.0) - (kf + 1.0) * next_ratio / a);
+            if k <= n {
+                q[k] = next_ratio;
             }
         }
+        let mut previous = q0;
+        for value in &mut q[1..] {
+            *value *= previous;
+            previous = *value;
+        }
+    }
+    if exterior && x < 0.0 {
         // Q_n(-x)=(-1)^(n+1) Q_n(x).
-        if x < 0.0 {
-            for (k, value) in q.iter_mut().enumerate() {
-                if k % 2 == 0 {
-                    *value = -*value;
-                }
-            }
+        for value in q.iter_mut().step_by(2) {
+            *value = -*value;
         }
     }
-    d[0] = 1.0 / denominator;
-    for k in 1..=n {
-        d[k] = (k as f64) * (q[k - 1] - x * q[k]) / denominator;
-    }
+    let mut d = Vec::with_capacity(n + 1);
+    d.push(1.0 / denominator);
+    d.extend(
+        q.windows(2)
+            .enumerate()
+            .map(|(k, pair)| ((k + 1) as f64) * (pair[0] - x * pair[1]) / denominator),
+    );
     if q.iter().chain(&d).any(|value| !value.is_finite()) {
         return Err(Error::NonFiniteEvaluation);
     }

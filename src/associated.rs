@@ -19,6 +19,7 @@ fn validate_degree(n: i32) -> Result<u32> {
 // Spherical normalization: sqrt((2n+1)/(4pi)*(n-m)!/(n+m)!).
 // Keep the diagonal in logarithmic form and rescale the recurrence, so tiny
 // diagonals can recover in later degrees and large factorials never overflow.
+#[inline]
 fn associated(n: u32, m: i32, x: f64, sine: f64, spherical: bool) -> f64 {
     if m == 0 {
         let value = crate::evaluate::eval_legendre(n as i32, x).unwrap_or(f64::NAN);
@@ -44,41 +45,20 @@ fn associated(n: u32, m: i32, x: f64, sine: f64, spherical: bool) -> f64 {
 /// `associated_degrees` and its logarithms and exponential are unnecessary.
 /// Returns `None` when the result is zero or not a normal number, leaving
 /// those cases to the scaled recurrence.
+#[inline]
 fn associated_direct(n: u32, m: i32, x: f64, sine: f64, spherical: bool) -> Option<f64> {
     let order = m.unsigned_abs();
     if order > 40 || n > 200 || order > n || sine < 1e-6 {
         return None;
     }
-    let mut diagonal = sine.powi(order as i32);
-    for k in 1..=order {
-        diagonal *= (2 * k - 1) as f64;
-    }
-    if order % 2 == 1 {
-        diagonal = -diagonal;
-    }
-    let (mut previous, mut current) = (0.0, diagonal);
+    let (mut previous, mut current) = (0.0, direct_diagonal(order, sine));
     for degree in order + 1..=n {
         let next = ((2 * degree - 1) as f64 * x * current - (degree + order - 1) as f64 * previous)
             / (degree - order) as f64;
         previous = current;
         current = next;
     }
-    // (n-|m|)!/(n+|m|)! as a product of reciprocals of n-|m|+1..=n+|m|.
-    let ratio = || {
-        let mut product = 1.0;
-        for k in n - order + 1..=n + order {
-            product /= k as f64;
-        }
-        product
-    };
-    let parity = if m < 0 && order % 2 == 1 { -1.0 } else { 1.0 };
-    let value = if spherical {
-        parity * current * ((2.0 * n as f64 + 1.0) / (4.0 * PI) * ratio()).sqrt()
-    } else if m < 0 {
-        parity * current * ratio()
-    } else {
-        current
-    };
+    let value = direct_value(n, m, current, spherical);
     value.is_normal().then_some(value)
 }
 
@@ -119,6 +99,18 @@ fn associated_direct_degrees(
 
 #[inline]
 fn direct_diagonal(order: u32, sine: f64) -> f64 {
+    // Small orders avoid a variable-exponent powi call and factorial loop.
+    // Keep the exponentiation-by-squaring and factorial multiplication order.
+    match order {
+        1 => return -sine,
+        2 => return sine * sine * 3.0,
+        3 => return -(sine * sine * sine * 3.0 * 5.0),
+        4 => {
+            let square = sine * sine;
+            return square * square * 3.0 * 5.0 * 7.0;
+        }
+        _ => {}
+    }
     let mut diagonal = sine.powi(order as i32);
     for k in 1..=order {
         diagonal *= (2 * k - 1) as f64;

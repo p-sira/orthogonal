@@ -67,6 +67,86 @@ fn independent_high_degree_and_legendre_domain_references() {
 }
 
 #[test]
+fn moderate_associated_legendre_small_orders() {
+    // mpmath 1.3.0, 65 dps, legenp(n, m, mp.mpf(x), type=2).
+    // The decimal x is converted from its exact binary64 value.
+    for (n, x, expected) in [
+        (
+            4,
+            0.4,
+            [
+                -0.11300000000000004,
+                1.7230484613033958,
+                0.7560000000000008,
+                -32.33465410360841,
+                74.088,
+            ],
+        ),
+        (
+            20,
+            -0.9,
+            [
+                -0.14930823530984846,
+                4.383833481822049,
+                80.81242558731017,
+                -1165.015286210591,
+                -47889.07738339338,
+            ],
+        ),
+        (
+            20,
+            0.4,
+            [
+                -0.10159261558628155,
+                3.169220227927003,
+                39.902576338912404,
+                -1394.393703462752,
+                -12868.28677877381,
+            ],
+        ),
+    ] {
+        for (m, expected) in expected.into_iter().enumerate() {
+            assert_relative(
+                assoc_legendre_p(n, m as i32, x).unwrap(),
+                expected,
+                2e-13,
+                &format!("P_{n}^{m}({x})"),
+            );
+        }
+    }
+}
+
+#[test]
+fn legendre_q_degree_32_values_and_derivatives() {
+    // mpmath 1.3.0, 65 dps, real part of legenq(32, 0, x, type=2 or 3)
+    // on the interior or exterior branch, respectively, and mp.diff.
+    for (x, expected, derivative) in [
+        (-0.9, 0.3206373948090272, 5.916497973703828),
+        (0.4, 0.16625130374790076, 5.6569860067210955),
+        (0.9, -0.3206373948090272, 5.916497973703828),
+        (1.01, 0.005768121702605605, -1.4607025104116675),
+        (2.0, 4.291629450962111e-20, -8.195511112765719e-19),
+    ] {
+        let (q, d) = lqn(32, x).unwrap();
+        assert_eq!(q.len(), 33);
+        assert_eq!(d.len(), 33);
+        assert_relative(q[32], expected, 2e-12, &format!("Q_32({x})"));
+        assert_relative(d[32], derivative, 2e-12, &format!("Q'_32({x})"));
+    }
+    for n in [0, 1] {
+        let (q, d) = lqn(n, -0.0).unwrap();
+        assert_eq!(q.len(), n + 1);
+        assert_eq!(d.len(), n + 1);
+        assert_eq!(q[0].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(d[0], 1.0);
+        if n == 1 {
+            assert_eq!(q[1], -1.0);
+            assert_eq!(d[1], 0.0);
+        }
+    }
+}
+
+#[test]
 fn high_degree_endpoint_recurrence_and_tables() {
     let max = 1_000_000;
     assert_eq!(eval_legendre(max, 1.0), 1.0);

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- Avoid redundant initialization and temporary allocations in `lqn`.
+- Streamline the direct associated Legendre recurrence for small orders.
+
 ## 0.2.2
 
 ### Performance
