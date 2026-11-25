@@ -99,18 +99,6 @@ fn associated_direct_degrees(
 
 #[inline]
 fn direct_diagonal(order: u32, sine: f64) -> f64 {
-    // Small orders avoid a variable-exponent powi call and factorial loop.
-    // Keep the exponentiation-by-squaring and factorial multiplication order.
-    match order {
-        1 => return -sine,
-        2 => return sine * sine * 3.0,
-        3 => return -(sine * sine * sine * 3.0 * 5.0),
-        4 => {
-            let square = sine * sine;
-            return square * square * 3.0 * 5.0 * 7.0;
-        }
-        _ => {}
-    }
     let mut diagonal = sine.powi(order as i32);
     for k in 1..=order {
         diagonal *= (2 * k - 1) as f64;
