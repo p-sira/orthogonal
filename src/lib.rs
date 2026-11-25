@@ -378,22 +378,18 @@ pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
     } else {
         (x.atanh(), 0.0)
     };
-    let mut q = Vec::with_capacity(n + 1);
-    q.push(q0);
+    let mut q = vec![0.0; n + 1];
+    q[0] = q0;
     if !exterior || (n as f64) * acosh <= 1.0 {
         // The forward recurrence also works sufficiently close to the
-        // exterior logarithmic singularity. Append each computed value once.
+        // exterior logarithmic singularity. Indexed writes avoid per-step
+        // vector growth bookkeeping in this recurrence.
         if n > 0 {
-            let mut previous = q0;
-            let mut current = a * q0 - 1.0;
-            q.push(current);
-            q.extend((2..=n).map(|k| {
-                let kf = k as f64;
-                let next = ((2.0 * kf - 1.0) * a * current - (kf - 1.0) * previous) / kf;
-                previous = current;
-                current = next;
-                next
-            }));
+            q[1] = a * q0 - 1.0;
+        }
+        for k in 2..=n {
+            let kf = k as f64;
+            q[k] = ((2.0 * kf - 1.0) * a * q[k - 1] - (kf - 1.0) * q[k - 2]) / kf;
         }
     } else {
         // Pincherle's minimal-solution continued fraction:
@@ -401,7 +397,6 @@ pub fn lqn(n: usize, x: f64) -> Result<(Vec<f64>, Vec<f64>)> {
         // Truncation error decreases exponentially with acosh(x).
         let extra = (20.0 / acosh).ceil().max(32.0) as usize;
         // Store ratios in the result buffer and replace them with Q values.
-        q.resize(n + 1, 0.0);
         let mut next_ratio = 0.0;
         for k in (1..=n + extra).rev() {
             let kf = k as f64;
